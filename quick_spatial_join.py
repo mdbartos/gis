@@ -6,15 +6,6 @@ from shapely import ops
 from itertools import chain
 from pyproj import Proj, transform
 
-states = fiona.open('/home/akagi/GIS/census/cb_2013_us_state_500k/cb_2013_us_state_500k.shp', 'r')
-
-county = fiona.open('/home/akagi/GIS/census/cb_2013_us_county_500k/cb_2013_us_county_500k.shp', 'r')
-
-book400 = fiona.open('/home/akagi/GIS/2014_All_Parcel_Shapefiles/2014_Book400.shp', 'r')
-
-zipcodes = fiona.open('/home/akagi/Desktop/census_az/Arizona_ZIP_Codes.shp', 'r') 
-
-
 class quick_spatial_join():
     def __init__(self, shp1, shp2, convert_crs=0):
         
