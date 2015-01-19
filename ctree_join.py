@@ -232,7 +232,7 @@ class quick_spatial_join():
 
 
     def check_matches(self):
-        s = pd.Series(range(len(b.shapes['shp1']['shp'])))
+        s = pd.Series(self.shapes['shp1']['shp'].index)
 
         geom = self.shapes['shp2']['types']
         ct_c = self.shp1_centroids.apply(geometry.Point)
