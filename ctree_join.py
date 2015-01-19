@@ -197,7 +197,7 @@ class quick_spatial_join():
         return s.apply(return_geom)
       
     def make_kdtree(self):
-
+        print 'constructing KDTree...'
         valmap = self.shapes['shp2']['poly'].apply(lambda x: x.buffer(-0.001*(x.area/x.length))).apply(pd.Series).stack().apply(lambda x: x.exterior.xy).apply(lambda x: np.column_stack([x[0], x[1]]))
 	
         valshape = valmap.apply(lambda x: x.shape[0]).apply(lambda x: np.arange(x)).reset_index()
@@ -219,6 +219,7 @@ class quick_spatial_join():
         self.shp2_idx = np.array(midx.get_level_values(0))
 
     def query_tree(self, neighbors=1):
+        print 'querying KDTree...'
         shp1_c = self.shapes['shp1']['poly'].apply(lambda x: x.centroid.coords[0])
     	x_1 = shp1_c.apply(lambda x: x[0])
 	y_1 = shp1_c.apply(lambda x: x[1])
@@ -232,6 +233,7 @@ class quick_spatial_join():
 
 
     def check_matches(self):
+        print 'checking predicates...'
         s = pd.Series(self.shapes['shp1']['shp'].index)
 
         geom = self.shapes['shp2']['types']
@@ -241,23 +243,26 @@ class quick_spatial_join():
 
 	if self.treequery[1].ndim == 1:
             containing_p = self.shapes['shp2']['poly'].loc[self.shp2_idx[self.treequery[1]]].reset_index()
-	    containing_bool = s.apply(lambda x: containing_p.iloc[x, 1].contains(ct_c[x]))
-	    match_d.update({i : containing_p['index'].where(containing_bool)})
+            containing_p.index = s.values
+	    containing_bool = s.apply(lambda x: containing_p.loc[x, 0].contains(ct_c[x]))
+	    match_d.update({0 : containing_p['index'].where(containing_bool)})
              
         else:
 	    for i in range(self.treequery[1].shape[1]):
                 containing_p = self.shapes['shp2']['poly'].loc[self.shp2_idx[self.treequery[1][:,i]]].reset_index()
-	        containing_bool = s.apply(lambda x: containing_p.iloc[x, 1].contains(ct_c[x]))
+                containing_p.index = s.values                 
+	        containing_bool = s.apply(lambda x: containing_p.loc[x, 0].contains(ct_c[x]))
 	        match_d.update({i : containing_p['index'].where(containing_bool)})
 
         return match_d
 
 
-book400 = '/home/akagi/GIS/2014_All_Parcel_Shapefiles/2014_Book400.shp'
-tracts = '/home/akagi/Desktop/census_az/Arizona_Census_Tracts.shp'
+book100 = '/home/tabris/GIS/assessor_2014/Parcels_100/Parcels_100.shp'
+tracts = '/home/tabris/Desktop/census_az/Arizona_Census_Tracts.shp'
 
-b = quick_spatial_join(book400, tracts)
+b = quick_spatial_join(book100, tracts)
 b.make_kdtree()
-b.query_tree(neighbors=4)
+b.query_tree()
 matches = b.check_matches()
+
 
