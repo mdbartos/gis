@@ -275,12 +275,15 @@ class quick_spatial_join():
         shp1_c_map = pd.Series(shp1_c.index)
 
         poly_result = polypath.apply(lambda x: x.contains_points(c))
-        poly_result = poly_result[poly_result.apply(lambda x: x.any())].apply(lambda x: np.where(x)[0]).apply(lambda x: shp1_c_map[x]).stack()
+        if poly_result.apply(lambda x: x.any()).any():
+            poly_result = poly_result[poly_result.apply(lambda x: x.any())].apply(lambda x: np.where(x)[0]).apply(lambda x: shp1_c_map[x]).stack()
 
-        nontree_matches = pd.DataFrame(poly_result.index.get_level_values(0), index=poly_result.values)
+            nontree_matches = pd.DataFrame(poly_result.index.get_level_values(0), index=poly_result.values)
 
-
-        return pd.concat([match_d, nontree_matches]).sort_index().dropna(how='all')
+            return pd.concat([match_d, nontree_matches]).sort_index().dropna(how='all')
+            
+        else:
+            return match_d.sort_index().dropna(how='all')
 
 
 book100 = '/home/tabris/GIS/assessor_2014/Parcels_100/Parcels_100.shp'
