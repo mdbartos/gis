@@ -6,7 +6,7 @@ from shapely import ops
 from itertools import chain
 from pyproj import Proj, transform
 from scipy import spatial
-
+from matplotlib import path
 
 class quick_spatial_join():
     def __init__(self, shp1, shp2, convert_crs=0):
@@ -254,7 +254,33 @@ class quick_spatial_join():
 	        containing_bool = s.apply(lambda x: containing_p.loc[x, 0].contains(ct_c[x]))
 	        match_d.update({i : containing_p['index'].where(containing_bool)})
 
-        return match_d
+        match_d = pd.DataFrame.from_dict(match_d)
+
+        print 'matching polygons not captured by KDtree...'
+
+        nullidx = match_d[match_d.isnull().all(axis=1)].index
+
+        poly = self.shapes['shp2']['shp'].loc[self.shapes['shp2']['types']=='Polygon']
+        mpoly = self.shapes['shp2']['shp'].loc[self.shapes['shp2']['types']== 'MultiPolygon'].apply(lambda x: (pd.Series(list(x)))).stack()
+        p_midx = pd.MultiIndex.from_arrays([np.array(poly.index), np.zeros(len(poly.index))])
+        poly.index = p_midx
+        poly_all = pd.concat([poly, mpoly])
+
+        polypath = poly_all.apply(lambda x: path.Path(x))
+
+        shp1_c = self.shp1_centroids.loc[nullidx]
+        x_1 = shp1_c.apply(lambda x: x[0])
+        y_1 = shp1_c.apply(lambda x: x[1])
+        c = np.column_stack([x_1, y_1])
+        shp1_c_map = pd.Series(shp1_c.index)
+
+        poly_result = polypath.apply(lambda x: x.contains_points(c))
+        poly_result = poly_result[poly_result.apply(lambda x: x.any())].apply(lambda x: np.where(x)[0]).apply(lambda x: shp1_c_map[x]).stack()
+
+        nontree_matches = pd.DataFrame(poly_result.index.get_level_values(0), index=poly_result.values)
+
+
+        return pd.concat([match_d, nontree_matches]).sort_index().dropna(how='all')
 
 
 book100 = '/home/tabris/GIS/assessor_2014/Parcels_100/Parcels_100.shp'
@@ -264,5 +290,3 @@ b = quick_spatial_join(book100, tracts)
 b.make_kdtree()
 b.query_tree()
 matches = b.check_matches()
-
-
