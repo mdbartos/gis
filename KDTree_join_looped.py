@@ -221,24 +221,24 @@ class quick_spatial_join():
 
         geomtypes = self.shapes[shp]['types'].loc[poly_df.index]
         
-        print 'making p'
+#        print 'making p'
         p = self.shapes[shp]['shp'].loc[geomtypes=='Polygon'].apply(lambda x: geometry.Polygon(x))#.apply(self.handle_empty) 
-        print 'setting polydf with p'
+#        print 'setting polydf with p'
         poly_df.loc[p.index] = p.copy()
         
-        print 'making mp'
+#        print 'making mp'
         mp = self.shapes[shp]['shp'].loc[geomtypes == 'MultiPolygon'].apply(lambda x: (pd.Series(list(x)))).stack().apply(geometry.Polygon).apply(self.handle_topo_err).apply(self.handle_empty).reset_index().groupby('level_0').apply(lambda x: ops.cascaded_union(list(x[0])))
         
-        print 'setting poly df with mp'
+#        print 'setting poly df with mp'
         poly_df.loc[mp.index] = mp.copy()
 
-        print 'making nullgeom'
+#        print 'making nullgeom'
         nullgeom = poly_df[poly_df.isnull()].index
 
-        print 'dropping nullgeom from polydf'
+#        print 'dropping nullgeom from polydf'
         poly_df = poly_df.drop(nullgeom)
         
-        print 'dropping nullgeom from selp.shapes.shp'
+#        print 'dropping nullgeom from selp.shapes.shp'
         self.shapes[shp]['shp'] = self.shapes[shp]['shp'].drop(nullgeom)
         
         return poly_df
