@@ -46,7 +46,7 @@ class quick_spatial_join():
 
         for chunk_n in self.chunks:
 
-            print 'Loop %s of %s...' % (chunk_ct+1, self.memratio+1)
+            print 'Loop %s of %s...' % (chunk_ct+1, self.memratio)
             if self.shapes['shp1']['crs'] != self.shapes['shp2']['crs']:
                 self.shapes['shp1'].update({'shp' : self.convert_crs('shp1', self.shapes['shp1']['crs'], self.shapes['shp2']['crs'], chunk_n)})
             else:
@@ -60,7 +60,7 @@ class quick_spatial_join():
 
             chunk_ct = chunk_ct + 1
 
-    print 'END: %s' % (str(datetime.now()))
+        print 'END: %s' % (str(datetime.now()))
 
 
     def file_chunks(self, l, n):
