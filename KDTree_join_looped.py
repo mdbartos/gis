@@ -46,14 +46,12 @@ class quick_spatial_join():
 
         for chunk_n in self.chunks:
 
-            print 'Loop %s of %s...' % (chunk_ct+1, self.memratio)
+            print 'Loop %s of %s...' % (chunk_ct+1, self.memratio+1)
             if self.shapes['shp1']['crs'] != self.shapes['shp2']['crs']:
                 self.shapes['shp1'].update({'shp' : self.convert_crs('shp1', self.shapes['shp1']['crs'], self.shapes['shp2']['crs'], chunk_n)})
             else:
                 self.shapes['shp1'].update({'shp' : self.homogenize_inputs('shp1', chunk_n)})
             
-            del self.shapes['shp1']['poly']
-
             self.shapes['shp1'].update({'poly' : self.poly_return('shp1')})
 
             self.shp1_centroids, self.treequery = self.query_tree()
@@ -94,7 +92,8 @@ class quick_spatial_join():
             p_trans_arrays = pd.concat([p_x_arrays, p_y_arrays], axis=1)
 
             d['p_geom'] = pd.Series(zip(p_trans_arrays[0], p_trans_arrays[1]), index=p_trans_arrays.index).apply(np.column_stack)
-        
+            d['p_geom'] = d['p_geom'][d['p_geom'].apply(lambda x: x.shape[0]>=4)]
+
         #### HOMOGENIZE MULTIPOLYGONS
         
         if len(mpoly) > 0:            
@@ -113,6 +112,7 @@ class quick_spatial_join():
                 empty_s = pd.Series(range(len(mp)), index=mp.index)
                 empty_s = empty_s.reset_index()
                 empty_s[0] = m_geom_1_s
+                empty_s = empty_s[empty_s[0].apply(lambda x: x.shape[0]>=4)]
 
                 d['m_geom_1'] = empty_s.groupby('level_0').apply(lambda x: tuple(list(x[0])))
 
@@ -120,10 +120,12 @@ class quick_spatial_join():
 
             if (mpolydims==3).any():
                 m_arrays_3 = a_mpoly[mpolydims==3].apply(pd.Series).stack().apply(lambda x: np.array(x)[:,[0,1]])
+                m_arrays_3 = m_arrays_3[m_arrays_3.apply(lambda x: x.shape[0]>=4)]
 
                 d['m_geom_3'] = m_arrays_3.reset_index().groupby('level_0').apply(lambda x: tuple(list(x[0])))
         
-        return pd.concat(d.values()).sort_index()
+        returndf = pd.concat(d.values()).sort_index()
+        return returndf
 
         
     def convert_crs(self, shp, crsfrom, crsto, chunk):
@@ -152,6 +154,7 @@ class quick_spatial_join():
             p_trans_arrays = pd.concat([p_x_arrays, p_y_arrays], axis=1).apply(lambda x: transform(crsfrom, crsto, x[0], x[1]), axis=1)
         
             d['p_trans_geom'] = p_trans_arrays.apply(np.array).apply(np.column_stack)
+            d['p_trans_geom'] = d['p_trans_geom'][d['p_trans_geom'].apply(lambda x: x.shape[0]>=4)]
         
         #### CONVERT MULTIPOLYGONS
         
@@ -170,14 +173,17 @@ class quick_spatial_join():
                 m_trans_geom_1_s = m_trans_arrays_1.apply(np.array).apply(np.column_stack)
                 empty_s = pd.Series(range(len(mp)), index=mp.index).reset_index()
                 empty_s[0] = m_trans_geom_1_s
+                empty_s = empty_s[empty_s[0].apply(lambda x: x.shape[0]>=4)]
 
                 d['m_trans_geom_1'] = empty_s.groupby('level_0').apply(lambda x: tuple(list(x[0])))
         
             ##ndim==3
             if (mpolydims==3).any():
                 m_trans_arrays_3 = a_mpoly[mpolydims==3].apply(pd.Series).stack().apply(lambda x: np.array(x)[:,[0,1]]).apply(lambda x: transform(crsfrom, crsto, x[:,0], x[:,1]))
-                m_trans_geom_3_s = m_trans_arrays_3.apply(np.array).apply(np.column_stack)
-                m_trans_geom_3_u = m_trans_geom_3_s.unstack()
+
+                m_trans_geom_3 = m_trans_arrays_3.apply(np.array).apply(np.column_stack)
+                m_trans_geom_3 = m_trans_geom_3[m_trans_geom_3.apply(lambda x: x.shape[0]>=4)]
+                m_trans_geom_3_u = m_trans_geom_3.unstack()
 
                 d['m_trans_geom_3'] = pd.Series(zip(m_trans_geom_3_u[0], m_trans_geom_3_u[1]), index=m_trans_geom_3_u.index)
         
@@ -210,16 +216,29 @@ class quick_spatial_join():
 
     def poly_return(self, shp):
         print 'creating polygons for %s...' % (shp)
+        print 'making poly df'
         poly_df = pd.Series(index=self.shapes[shp]['shp'].index)
-        
-        p = self.shapes[shp]['shp'].loc[self.shapes[shp]['types']=='Polygon'].apply(lambda x: geometry.Polygon(x)).apply(self.handle_empty) 
-        poly_df.loc[p.index] = p
-        
-        mp = self.shapes[shp]['shp'].loc[self.shapes[shp]['types']== 'MultiPolygon'].apply(lambda x: (pd.Series(list(x)))).stack().apply(geometry.Polygon).apply(self.handle_topo_err).apply(self.handle_empty).reset_index().groupby('level_0').apply(lambda x: ops.cascaded_union(list(x[0])))
-        poly_df.loc[mp.index] = mp
 
+        geomtypes = self.shapes[shp]['types'].loc[poly_df.index]
+        
+        print 'making p'
+        p = self.shapes[shp]['shp'].loc[geomtypes=='Polygon'].apply(lambda x: geometry.Polygon(x))#.apply(self.handle_empty) 
+        print 'setting polydf with p'
+        poly_df.loc[p.index] = p.copy()
+        
+        print 'making mp'
+        mp = self.shapes[shp]['shp'].loc[geomtypes == 'MultiPolygon'].apply(lambda x: (pd.Series(list(x)))).stack().apply(geometry.Polygon).apply(self.handle_topo_err).apply(self.handle_empty).reset_index().groupby('level_0').apply(lambda x: ops.cascaded_union(list(x[0])))
+        
+        print 'setting poly df with mp'
+        poly_df.loc[mp.index] = mp.copy()
+
+        print 'making nullgeom'
         nullgeom = poly_df[poly_df.isnull()].index
+
+        print 'dropping nullgeom from polydf'
         poly_df = poly_df.drop(nullgeom)
+        
+        print 'dropping nullgeom from selp.shapes.shp'
         self.shapes[shp]['shp'] = self.shapes[shp]['shp'].drop(nullgeom)
         
         return poly_df
@@ -328,3 +347,4 @@ la = '/home/tabris/Desktop/Vulnerability Files/parcels_AIN_2.shp'
 latracts = '/home/tabris/Desktop/Vulnerability Files/tl_2010_06037_tract10.shp'
 
 b = quick_spatial_join(la, latracts, memsize=400000000)
+#b = quick_spatial_join(la, latracts)
