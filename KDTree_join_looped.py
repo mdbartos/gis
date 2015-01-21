@@ -12,7 +12,7 @@ from datetime import datetime
 import sys
 
 class quick_spatial_join():
-    def __init__(self, shp1, shp2, convert_crs=0, memsize=240000000, loopit=False):
+    def __init__(self, shp1, shp2, convert_crs=0, memsize=240000000):
         print 'START: %s' % (str(datetime.now()))
         print 'loading files...'        
         self.shapes = {
