@@ -1,3 +1,20 @@
+import pandas as pd
+import numpy as np
+import fiona
+from shapely import geometry
+from shapely import ops
+from itertools import chain
+from pyproj import Proj, transform
+from scipy import spatial
+from matplotlib import path
+import os
+from datetime import datetime
+import sys
+import pysal
+import numpy as np
+from scipy import spatial
+
+
 class quick_spatial_join():
     def __init__(self, shp1, shp2, convert_crs=0, memsize=240000000, man_input_1=None,  man_input_2=None, autorun=True, tiebreak=True):
         print 'START: %s' % (str(datetime.now()))
