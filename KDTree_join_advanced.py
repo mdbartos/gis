@@ -10,7 +10,7 @@ from matplotlib import path
 import os
 from datetime import datetime
 import sys
-import pysal
+import pysal as ps
 import numpy as np
 from scipy import spatial
 
@@ -92,7 +92,7 @@ class quick_spatial_join():
                     else:
                         crs1 = Proj(self.shapes['shp1']['crs'], preserve_units=True)
                         crs2 = Proj(self.shapes['shp2']['crs'], preserve_units=True)
-                        self.shp1_centroids = self.shapes['shp1']['shp'].apply(lambda x: transform(crs1, crs2, x[0], x[1]))
+                        self.shp1_centroids = self.shapes['shp1']['shp'].loc[chunk_n].apply(lambda x: transform(crs1, crs2, x[0], x[1]))
 
                 else:
                     if man_input_1==None:
@@ -326,10 +326,14 @@ class quick_spatial_join():
       
     def make_kdtree(self):
         print 'constructing KDTree...'
-        valmap = self.shapes['shp2']['poly'].apply(lambda x: x.buffer(-0.001*(x.area/x.length))).apply(pd.Series).stack().apply(lambda x: x.exterior.xy).apply(lambda x: np.column_stack([x[0], x[1]]))
+        print 'make valmap'
+        valmap = self.shapes['shp2']['poly'].apply(lambda x: x.buffer(-0.001*(x.area/x.length))).apply(pd.Series).stack()
+        
+        valmap = valmap.mask(valmap.apply(lambda x: x.is_empty)).dropna().apply(lambda x: x.exterior.xy).apply(lambda x: np.column_stack([x[0], x[1]]))
 	
         valshape = valmap.apply(lambda x: x.shape[0]).apply(lambda x: np.arange(x)).reset_index()
 
+        print 'make idx arrays'
         idx_arrays = []
 
         for i in valshape.values:
@@ -341,6 +345,8 @@ class quick_spatial_join():
         midx = pd.MultiIndex.from_arrays([idx_arrays[:,0], idx_arrays[:,1], idx_arrays[:,2]])
 
         vals = np.concatenate(valmap.values)
+        
+        print 'make kdtree'
 
         self.kdtree = spatial.cKDTree(vals)
 	
@@ -365,8 +371,11 @@ class quick_spatial_join():
 
     def check_matches(self):
         print 'checking predicates...'
-        s = pd.Series(self.shapes['shp1']['shp'].index, index=self.shapes['shp1']['shp'].index)
-
+        if self.man_input_1==False:
+            s = pd.Series(self.shapes['shp1']['shp'].index, index=self.shapes['shp1']['shp'].index)
+        else:
+            s = pd.Series(self.shp1_centroids.index, index=self.shp1_centroids.index)
+        
         geom = self.shapes['shp2']['types']
         ct_c = self.shp1_centroids.apply(geometry.Point)
 
