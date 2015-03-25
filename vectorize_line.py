@@ -44,9 +44,10 @@ class vectorize_lines():
         #### HOMOGENIZE MULTILINESTR
         
         if len(mlinestr) > 0:
-            pass
+            print 'warning: coercing multilinestring to linestring'
+            mlinearrays = mlinestr.apply(lambda x: np.array(list(chain(*x))))
 
-        return linearrays  
+        return pd.concat([linearrays, mlinearrays]).sort_index()    
     
     
     def line_extract(self, shpfile):
