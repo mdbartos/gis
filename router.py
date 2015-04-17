@@ -7,17 +7,18 @@ def build_args(arr):
     
     idx = np.indices(g.shape)
     
+    # ALL GOING CLOCKWISE
     #CORNERS
     c = {
-    'nw' : idx[:,0,0],
-    'ne' : idx[:,0,-1],
-    'sw' : idx[:,-1,0],
-    'se' : idx[:,-1,-1],
+    'nw' : {'k' : idx[:,0,0], 'v' : [[1,1,0], [0,1,1]]}
+    'ne' : {'k' : idx[:,0,-1], 'v' : [[-1,-2,-2], [1,1,0]]}
+    'sw' : {'k' : idx[:,-1,0], 'v' : [[1,1,0], [-2,-2,-1]]}
+    'se' : {'k' : idx[:,-1,-1], 'v' : [[-1,-2,-2], [-1,-2,-2]]}
     }
 
     #edges
     edges = {
-    'n' : idx[:,0,1:-1] ,
+    'n' : idx[:,0,1:-1],
     'w' : idx[:,1:-1,0],
     'e' : idx[:,1:-1,-1],
     's' : idx[:,-1,1:-1],
@@ -27,6 +28,9 @@ def build_args(arr):
     body = idx[:, 1:-1, 1:-1]
 
     outmap = np.empty(g.shape)
+
+def select_corners(k):
+    pass
 
 def select_surround(i, j):
     return [i+0, i+1, i+1, i+1, i+0, i-1, i-1, i-1], [j+1, j+1, j+0, j-1, j-1, j-1, j+0, j+1]
@@ -49,3 +53,4 @@ for i, j in np.nditer([body[0], body[1]], flags=['external_loop']):
     b = np.argmax((dat - sur), axis=0) + 1
     c = 0
     outmap2[i,j] = np.where(a,b,c)
+
