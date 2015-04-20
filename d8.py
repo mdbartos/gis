@@ -34,7 +34,7 @@ class d8():
 	
         self.pour = pour
         self.nodata = nodata    
-        self.idx = np.indices(data.shape)
+        self.idx = np.indices(self.data.shape)
 
         if autorun == True:
             if input_type == 'dem':
@@ -282,3 +282,4 @@ class d8():
             	             self.d.ravel(), self.nodata)
         catchment[n] = self.pour
         return catchment.reshape(self.d.shape)
+
