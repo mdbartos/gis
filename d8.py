@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-g = np.random.uniform(200,210,100).reshape(10,10)
+g = np.random.uniform(200,210,10000).reshape(100,100)
 
 class d8():
         
@@ -146,27 +146,27 @@ class d8():
 
     def prep_accum(self):
 
-	coverage = []
+        coverage = np.full(self.d.size, -1)
+        ravel_d = self.d.ravel()
         iterarr = np.vstack(np.dstack(self.idx)) 
         iterange = np.arange(self.d.size) 
         outer = {}
 
-        def goto_cell_r(i, j):
+        def goto_cell_r(i):
             inner.append(i)
             dirs = [[0,0], [-1,0], [-1,1], [0,1], [1,1],
-		    [1,0], [1,-1], [0,-1], [-1,-1]]
-            move = dirs[self.d[tuple(j)]]
+            [1,0], [1,-1], [0,-1], [-1,-1]]
+            move = dirs[ravel_d[i]]
             next_i = i + move[1] + move[0]*self.d.shape[1]
-            next_cell = j + move
-            if self.d[tuple(j)] == self.nodata:
+            if ravel_d[i] == self.nodata:
                 return i
-            elif (next_cell < 0).any(): #SHOULD ALSO ACCOUNT FOR N > SHAPE[0], SHAPE[1]
-                return i
-            elif next_i in coverage:
+#            elif (next_cell < 0).any(): #SHOULD ALSO ACCOUNT FOR N > SHAPE[0], SHAPE[1]
+#                return i
+            elif coverage[next_i] == next_i:
                 return next_i
             else:
-                coverage.append(next_i)
-                return goto_cell_r(next_i, next_cell)
+                coverage[next_i] = next_i
+                return goto_cell_r(next_i)
 
         def pad_inner(lst, dtype=np.int64):
             inner_max_len = max(map(len, lst))
@@ -180,32 +180,32 @@ class d8():
             b = a.copy()
             f = np.vectorize(lambda x: x.shape[1])
             ms = f(b).max()
-            print ms
+#            print ms
             for i in range(len(b)):
                 b[i] = np.pad(
-			b[i],
-			((0,0), (0, ms-b[i].shape[1])),
-			mode='constant',
-			constant_values=self.nodata)
+            b[i],
+            ((0,0), (0, ms-b[i].shape[1])),
+            mode='constant',
+            constant_values=self.nodata)
             return np.vstack(b)
 
         for w in iterange:
-            if not w in coverage:
+            if coverage[w] != w:
                 inner = []
-                coverage.append(w)
-                v = iterarr[w]
-                h = goto_cell_r(w, v)
+                coverage[w] = w
+#                v = iterarr[w]
+                h = goto_cell_r(w)
                 if not h in outer.keys():
                     outer.update({h : []})
                 inner = np.array(inner)
-                inner = inner[np.where(inner != h)]
+                inner = inner[np.where(inner != h)] #EXPENSIVE
                 outer[h].append(inner)
         
         for h in outer.keys():
             outer[h] = np.array(outer[h])
 
         outer = pd.Series(outer)
-        return (outer.apply(np.concatenate), pad_outer(np.array([pad_inner(i) for i in outer.values])))
+        return (outer.apply(np.concatenate), pad_outer(np.array([pad_inner(i) for i in outer.values])).astype(int))
 
     def accum(self):
 
@@ -217,22 +217,23 @@ class d8():
         if (not hasattr(self, 'branches')) or (not hasattr(self, 'pos')):
             self.branches, self.pos = self.prep_accum()
 
+            self.k = self.branches.index.values
+            self.u = np.unique(self.pos) #MIGHT BE CALLING THESE TWO EACH TIME IT IS APPLIED
+
         def get_accumulation(n):
-            k = self.branches.index.values
-            u = np.unique(self.pos)
             # PRIMARY
-            if (not n in k) and (n in u):
+            if (not n in self.k) and (n in self.u):
                 return np.where(self.pos==n)[1].sum()
             # INTERMEDIATE
-            elif (n in k) and (n in u):
+            elif (n in self.k) and (n in self.u):
                 prim = len(self.branches[n])
                 sec = np.where(self.pos==n)[1].sum()
                 return prim + sec
             # FINAL
-            elif (n in k) and (not n in u):
+            elif (n in self.k) and (not n in self.u):
                 upcells = self.branches[n]
                 prim = len(upcells)
-                if np.in1d(upcells, k).any():
+                if np.in1d(upcells, self.k).any():
                     sec = np.concatenate(self.branches.loc[upcells].dropna().values).size
                 else:
                     sec = 0
@@ -256,30 +257,30 @@ class d8():
         elif isinstance(n, (tuple, list, np.ndarray)):
             n = n[0] + n[1]*self.d.shape[1]
 
+        self.k = self.branches.index.values
+        self.u = np.unique(self.pos)
+
         def get_catchment(n):
-            k = self.branches.index.values
-            u = np.unique(self.pos)
             # PRIMARY
-            if (not n in k) and (n in u):
+            if (not n in self.k) and (n in self.u):
                 q = np.where(self.pos==n)
                 return self.pos[q[0], :q[1]]
             # INTERMEDIATE
-            elif (n in k) and (n in u):
+            elif (n in self.k) and (n in self.u):
                 prim = self.branches[n]
                 q = np.where(self.pos==n)
                 sec = self.pos[q[0], :q[1]]
                 return np.concatenate([prim.ravel(), sec.ravel()])
             # FINAL
-            elif (n in k) and (not n in u):
+            elif (n in self.k) and (not n in self.u):
                 upcells = self.branches[n]
-                if np.in1d(upcells, k).any():
+                if np.in1d(upcells, self.k).any():
                     sec = np.concatenate(self.branches.loc[upcells].dropna().values)
                     return np.concatenate([upcells.ravel(), sec.ravel()])
                 else:
                     return upcells.ravel()
     
         catchment = np.where(np.in1d(iterange, get_catchment(n)),
-            	             self.d.ravel(), self.nodata)
+                             self.d.ravel(), self.nodata)
         catchment[n] = self.pour
         return catchment.reshape(self.d.shape)
-
