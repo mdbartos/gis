@@ -150,7 +150,7 @@ class d8():
         ravel_d = self.d.ravel()
         iterarr = np.vstack(np.dstack(self.idx)) 
         iterange = np.arange(self.d.size) 
-        outer = {}
+        outer = pd.Series(index=iterange).apply(lambda x: [])
 
         def goto_cell_r(i):
             inner.append(i)
@@ -194,53 +194,67 @@ class d8():
                 inner = []
                 coverage[w] = w
 #                v = iterarr[w]
-                h = goto_cell_r(w)
-                if not h in outer.keys():
-                    outer.update({h : []})
-                inner = np.array(inner)
-                inner = inner[np.where(inner != h)] #EXPENSIVE
-                outer[h].append(inner)
+                if ravel_d[w] != self.nodata:
+                    h = goto_cell_r(w)
+    #                if not h in outer.index.values:
+    #                    outer.update({h : []})
+                    inner = np.array(inner)
+                    inner = inner[np.where(inner != h)] #EXPENSIVE
+                    outer[h].append(inner)
         
-        for h in outer.keys():
-            outer[h] = np.array(outer[h])
+        outer = outer.apply(np.array)
+        outer = outer[outer.str.len() > 0]
 
-        outer = pd.Series(outer)
-        return (outer.apply(np.concatenate), pad_outer(np.array([pad_inner(i) for i in outer.values])).astype(int))
+        return (outer.apply(np.concatenate),
+                pad_outer(np.array([pad_inner(i) for i in outer.values])).astype(int))
 
     def accum(self):
 
         if not hasattr(self, 'd'):
             self.d = self.flowdir()
 
-        iterange = np.arange(self.d.size) 
+        iterange = pd.Series(np.arange(self.d.size, dtype=int))
 
         if (not hasattr(self, 'branches')) or (not hasattr(self, 'pos')):
             self.branches, self.pos = self.prep_accum()
 
             self.k = self.branches.index.values
             self.u = np.unique(self.pos) #MIGHT BE CALLING THESE TWO EACH TIME IT IS APPLIED
-
-        def get_accumulation(n):
-            # PRIMARY
-            if (not n in self.k) and (n in self.u):
-                return np.where(self.pos==n)[1].sum()
+        
+        def get_accumulation_i(n):
             # INTERMEDIATE
-            elif (n in self.k) and (n in self.u):
-                prim = len(self.branches[n])
-                sec = np.where(self.pos==n)[1].sum()
-                return prim + sec
-            # FINAL
-            elif (n in self.k) and (not n in self.u):
-                upcells = self.branches[n]
-                prim = len(upcells)
-                if np.in1d(upcells, self.k).any():
-                    sec = np.concatenate(self.branches.loc[upcells].dropna().values).size
-                else:
-                    sec = 0
-                return prim + sec
+            prim = len(self.branches[n])
+            return prim
 
-        acc_out = np.vectorize(get_accumulation)
-        return acc_out(iterange).reshape(self.d.shape)
+        def get_accumulation_t(n):
+            # FINAL
+            upcells = self.branches[n]
+            prim = len(upcells)
+            if np.in1d(upcells, self.k).any():
+                sec = np.concatenate(self.branches.loc[upcells].dropna().values).size
+            else:
+                sec = 0
+            return prim + sec
+
+        primary =  iterange[~(iterange.isin(self.k)) & (iterange.isin(self.u))]
+        intermediate = iterange[(iterange.isin(self.k)) & (iterange.isin(self.u))]
+        terminal = iterange[(iterange.isin(self.k)) & ~(iterange.isin(self.u))]
+        noflow = iterange[~(iterange.isin(self.k)) & ~(iterange.isin(self.u))]
+
+        intermediate = intermediate.apply(get_accumulation_i)
+
+        primary[:] = 0
+        noflow[:] = 0
+
+        for i in range(self.pos.shape[1]):
+            primary[np.in1d(primary.index.values, self.pos[:,i])] += i
+            intermediate[np.in1d(intermediate.index.values, self.pos[:,i])] += i
+ 
+        terminal = terminal.apply(get_accumulation_t)
+
+        iterange = pd.concat([primary, intermediate, terminal, noflow]).sort_index().values
+
+        return iterange.reshape(self.d.shape)
 
     def catch(self, n):
 
