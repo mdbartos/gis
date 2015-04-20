@@ -5,14 +5,14 @@ g = np.random.uniform(200,210,100).reshape(10,10)
 
 class d8():
         
-    def __init__(self, g, data_type='dem', input_type='ascii', band=1, nodata=-1, pour=9, bbox=None, autorun=False):
+    def __init__(self, data, data_type='dem', input_type='ascii', band=1, nodata=-1, pour=9, bbox=None, autorun=False):
 
         if input_type == 'ascii':
             pass
 
 	if input_type == 'raster':
 	    import rasterio
-	    f = rasterio.open(g)
+	    f = rasterio.open(data)
             self.crs = f.crs
             self.bbox = tuple(f.bounds)
             self.shape = f.shape
@@ -25,23 +25,26 @@ class d8():
             self.data = self.data.reshape(self.shape)
 
         if input_type == 'array':
-            self.g = g
-            self.shape = g.shape
+            self.data = data
+            self.shape = data.shape
             if bbox:
                 self.bbox = bbox
             else:
-                self.bbox = (0, 0, g.shape[0], g.shape[1])
-	    
-        self.idx = np.indices(g.shape)
+                self.bbox = (0, 0, data.shape[0], data.shape[1])
+	
+        self.pour = pour
+        self.nodata = nodata    
+        self.idx = np.indices(data.shape)
 
         if autorun == True:
             if input_type == 'dem':
-                self.d = self.flowdir(g)
+                self.d = self.flowdir(data)
             elif input_type == 'flowdir':
-                self.d = g
-	
-	self.outer = None
-	self.o = None
+                self.d = data
+
+            self.branches, self.pos = self.prep_accum()
+            self.accumulation = self.accum()
+            self.catchment = self.catch()
 
     def clip_array(self, new_bbox, inplace=False):
         df = pd.DataFrame(self.data,
@@ -59,41 +62,41 @@ class d8():
             self.bbox = new_bbox
             self.shape = self.data.shape
 
-    def flowdir(self, data=self.data): 
+    def flowdir(self): 
 
         #corners
         c = {
-        'nw' : {'k' : tuple(idx[:,0,0]),
+        'nw' : {'k' : tuple(self.idx[:,0,0]),
 	        'v' : [[0,1,1], [1,1,0]],
 		'pad': np.array([3,4,5])},
-        'ne' : {'k' : tuple(idx[:,0,-1]),
+        'ne' : {'k' : tuple(self.idx[:,0,-1]),
 	        'v' : [[1,1,0], [-1,-2,-2]],
 		'pad': np.array([5,6,7])},
-        'sw' : {'k' : tuple(idx[:,-1,0]),
+        'sw' : {'k' : tuple(self.idx[:,-1,0]),
 	        'v' : [[-2,-2,-1], [0,1,1]],
 		'pad': np.array([1,2,3])},
-        'se' : {'k' : tuple(idx[:,-1,-1]),
+        'se' : {'k' : tuple(self.idx[:,-1,-1]),
 	        'v' : [[-1,-2,-2], [-2,-2,-1]],
 		'pad': np.array([7,8,1])}
         }
     
         #edges
         edge = {
-        'n' : {'k' : tuple(idx[:,0,1:-1]),
+        'n' : {'k' : tuple(self.idx[:,0,1:-1]),
 	       'pad' : np.array([3,4,5,6,7])},
-        'w' : {'k' : tuple(idx[:,1:-1,0]),
+        'w' : {'k' : tuple(self.idx[:,1:-1,0]),
 	       'pad' : np.array([1,2,3,4,5])},
-        'e' : {'k' : tuple(idx[:,1:-1,-1]),
+        'e' : {'k' : tuple(self.idx[:,1:-1,-1]),
 	       'pad' : np.array([1,5,6,7,8])},
-        's' : {'k' : tuple(idx[:,-1,1:-1]),
+        's' : {'k' : tuple(self.idx[:,-1,1:-1]),
 	       'pad' : np.array([1,2,3,7,8])}
         }
     
         #body
-        body = idx[:, 1:-1, 1:-1]
+        body = self.idx[:, 1:-1, 1:-1]
     
         #output
-        outmap = np.zeros(g.shape, dtype=np.int8)
+        outmap = np.zeros(self.data.shape, dtype=np.int8)
     
     
         def select_surround(i, j):
@@ -114,29 +117,29 @@ class d8():
     
         # FILL CORNERS
         for i in c.keys():
-            dat = g[c[i]['k']]
-            sur = g[c[i]['v']]
+            dat = self.data[c[i]['k']]
+            sur = self.data[c[i]['v']]
             if ((dat - sur) > 0).any():
                 outmap[c[i]['k']] = c[i]['pad'][np.argmax(dat - sur)]
             else:
-                outmap[c[i]['k']] = 0
+                outmap[c[i]['k']] = self.nodata
     
         # FILL BODY
         for i, j in np.nditer(tuple(body), flags=['external_loop']):
-            dat = g[i,j]
-            sur = g[select_surround(i,j)]
+            dat = self.data[i,j]
+            sur = self.data[select_surround(i,j)]
             a = ((dat - sur) > 0).any(axis=0)
             b = np.argmax((dat - sur), axis=0) + 1
-            c = 0
+            c = self.nodata
             outmap[i,j] = np.where(a,b,c)
     
         #FILL EDGES
         for x in edge.keys():
-            dat = g[edge[x]['k']]
-            sur = g[select_edge_sur(x)]
+            dat = self.data[edge[x]['k']]
+            sur = self.data[select_edge_sur(x)]
             a = ((dat - sur) > 0).any(axis=0)
             b = edge[x]['pad'][np.argmax((dat - sur), axis=0)]
-            c = 0
+            c = self.nodata
             outmap[edge[x]['k']] = np.where(a,b,c)
     
         return outmap
@@ -144,18 +147,18 @@ class d8():
     def prep_accum(self):
 
 	coverage = []
-        iterarr = np.vstack(np.dstack(idx))
-        iterange = np.arange(d.size) 
+        iterarr = np.vstack(np.dstack(self.idx)) 
+        iterange = np.arange(self.d.size) 
         outer = {}
 
         def goto_cell_r(i, j):
             inner.append(i)
             dirs = [[0,0], [-1,0], [-1,1], [0,1], [1,1],
 		    [1,0], [1,-1], [0,-1], [-1,-1]]
-            move = dirs[d[tuple(j)]]
-            next_i = i + move[1] + move[0]*d.shape[1]
+            move = dirs[self.d[tuple(j)]]
+            next_i = i + move[1] + move[0]*self.d.shape[1]
             next_cell = j + move
-            if d[tuple(j)] == 0:
+            if self.d[tuple(j)] == self.nodata:
                 return i
             elif (next_cell < 0).any(): #SHOULD ALSO ACCOUNT FOR N > SHAPE[0], SHAPE[1]
                 return i
@@ -165,7 +168,7 @@ class d8():
                 coverage.append(next_i)
                 return goto_cell_r(next_i, next_cell)
 
-        def apply_to_zeros(lst, dtype=np.int64):
+        def pad_inner(lst, dtype=np.int64):
             inner_max_len = max(map(len, lst))
             result = np.full([len(lst), inner_max_len], -1)
             for i, row in enumerate(lst):
@@ -173,7 +176,7 @@ class d8():
                     result[i][j] = val
             return result
         
-        def pad_and_cat(a):
+        def pad_outer(a):
             b = a.copy()
             f = np.vectorize(lambda x: x.shape[1])
             ms = f(b).max()
@@ -183,7 +186,7 @@ class d8():
 			b[i],
 			((0,0), (0, ms-b[i].shape[1])),
 			mode='constant',
-			constant_values=-1)
+			constant_values=self.nodata)
             return np.vstack(b)
 
         for w in iterange:
@@ -201,73 +204,81 @@ class d8():
         for h in outer.keys():
             outer[h] = np.array(outer[h])
 
-        self.outer = pd.Series(outer)
-        self.o = pad_and_cat(np.array([apply_to_zeros(i) for i in outer.values]))
+        outer = pd.Series(outer)
+        return (outer.apply(np.concatenate), pad_outer(np.array([pad_inner(i) for i in outer.values])))
 
     def accum(self):
 
-        iterange = np.arange(d.size) 
+        if not hasattr(self, 'd'):
+            self.d = self.flowdir()
 
-        if (not self.outer) or (not self.o):
-            self.prep_accum()
+        iterange = np.arange(self.d.size) 
+
+        if (not hasattr(self, 'branches')) or (not hasattr(self, 'pos')):
+            self.branches, self.pos = self.prep_accum()
 
         def get_accumulation(n):
-            k = outer.index.values
-            u = np.unique(o)
+            k = self.branches.index.values
+            u = np.unique(self.pos)
             # PRIMARY
             if (not n in k) and (n in u):
-                return np.where(o==n)[1].sum()
+                return np.where(self.pos==n)[1].sum()
             # INTERMEDIATE
             elif (n in k) and (n in u):
-                prim = len(np.concatenate(outer[n]))
-                sec = np.where(o==n)[1].sum()
+                prim = len(self.branches[n])
+                sec = np.where(self.pos==n)[1].sum()
                 return prim + sec
             # FINAL
             elif (n in k) and (not n in u):
-                upcells = np.concatenate(outer[n])
+                upcells = self.branches[n]
                 prim = len(upcells)
                 if np.in1d(upcells, k).any():
-                    sec = np.concatenate(outer.loc[upcells].dropna().values).size
+                    sec = np.concatenate(self.branches.loc[upcells].dropna().values).size
                 else:
                     sec = 0
                 return prim + sec
 
         acc_out = np.vectorize(get_accumulation)
-        return acc_out(iterange).reshape(d.shape)
+        return acc_out(iterange).reshape(self.d.shape)
 
-    def catchment(self, n):
+    def catch(self, n):
 
-        iterange = np.arange(d.size) 
+        if not hasattr(self, 'd'):
+            self.d = self.flowdir()
 
-        if (not self.outer) or (not self.o):
-            self.prep_accum()
+        iterange = np.arange(self.d.size) 
+
+        if (not hasattr(self, 'branches')) or (not hasattr(self, 'pos')):
+            self.branches, self.pos = self.prep_accum()
+
+        if isinstance(n, int):
+            pass
+        elif isinstance(n, (tuple, list, np.ndarray)):
+            n = n[0] + n[1]*self.d.shape[1]
 
         def get_catchment(n):
-            k = outer.index.values
-            u = np.unique(o)
+            k = self.branches.index.values
+            u = np.unique(self.pos)
             # PRIMARY
             if (not n in k) and (n in u):
-                q = np.where(o==n)
-                return o[q[0], :q[1]]
+                q = np.where(self.pos==n)
+                return self.pos[q[0], :q[1]]
             # INTERMEDIATE
             elif (n in k) and (n in u):
-                prim = np.concatenate(outer[n])
-                q = np.where(o==n)
-                sec = o[q[0], :q[1]]
+                prim = self.branches[n]
+                q = np.where(self.pos==n)
+                sec = self.pos[q[0], :q[1]]
                 return np.concatenate([prim.ravel(), sec.ravel()])
             # FINAL
             elif (n in k) and (not n in u):
-                upcells = np.concatenate(outer[n])
+                upcells = self.branches[n]
                 if np.in1d(upcells, k).any():
-                    sec = np.concatenate(outer.loc[upcells].dropna().values)
+                    sec = np.concatenate(self.branches.loc[upcells].dropna().values)
                     return np.concatenate([upcells.ravel(), sec.ravel()])
                 else:
                     return upcells.ravel()
     
-            def delineate_catchment(n):
-                catchment = np.where(np.in1d(iterange, get_catchment(n)),
-            	                 d.ravel(), np.nan)
-                catchment[n] = self.pour
-                return catchment.reshape(d.shape)
-
-        return delineate_catchment(n)
+        catchment = np.where(np.in1d(iterange, get_catchment(n)),
+            	             self.d.ravel(), self.nodata)
+        catchment[n] = self.pour
+        return catchment.reshape(self.d.shape)
