@@ -192,7 +192,7 @@ class d8():
             b[i],
             ((0,0), (0, ms-b[i].shape[1])),
             mode='constant',
-            constant_values=np.iinfo(self.size_min).max)
+            constant_values = np.iinfo(self.size_min).max)
             return np.vstack(b)
 
         for w in outer.index:
@@ -212,63 +212,78 @@ class d8():
         self.d = self.d.reshape(self.shape)
 
         return (outer.apply(np.concatenate),
-                pad_outer(np.array([pad_inner(i) for i in outer.values])).astype(int))
+                pad_outer(np.array([pad_inner(i) for i in outer.values])).astype(self.size_min))
 
     def accum(self):
 
         if not hasattr(self, 'd'):
             self.d = self.flowdir()
 
-        iterange = pd.Series(np.arange(self.d.size, dtype=int))
+        iterange = pd.Series(np.arange(self.d.size, dtype=self.size_min))
 
         if (not hasattr(self, 'branches')) or (not hasattr(self, 'pos')):
             self.branches, self.pos = self.prep_accum()
 
-            self.k = self.branches.index.values
-            self.u = np.unique(self.pos) #MIGHT BE CALLING THESE TWO EACH TIME IT IS APPLIED
+        def recursive_inter(arr):
+            self.outer_s = pd.Series(np.zeros(arr.size), index=arr.index)
+
+            def ret_branches(x):
+                i = np.in1d(x.values, self.branches.index.values)
+                if i.any():
+                    retseries = self.branches[x.values[i]]
+                    lenseries = retseries.apply(len)
+                    self.outer_s = self.outer_s + lenseries.reindex(self.outer_s.index).fillna(0)
+                    return ret_branches(pd.Series(np.concatenate(retseries.dropna().values), index=retseries.index.values.repeat(lenseries)))
+            ret_branches(arr)
+
+            return self.outer_s
+
+        self.u = np.unique(self.pos[self.pos != np.iinfo(self.size_min).max]) 
         
-        def get_accumulation_i(n):
-            # INTERMEDIATE
-            prim = len(self.branches[n])
-            return prim
+        primary =  iterange[~(iterange.isin(self.branches.index.values))
+                            & (iterange.isin(self.u))]
+        intermediate = iterange[(iterange.isin(self.branches.index.values))
+                            & (iterange.isin(self.u))]
+        terminal = iterange[(iterange.isin(self.branches.index.values))
+                            & ~(iterange.isin(self.u))]
+        noflow = iterange[~(iterange.isin(self.branches.index.values))
+                            & ~(iterange.isin(self.u))]
+        del iterange
 
-        def get_accumulation_t(n):
-            # FINAL
-            upcells = self.branches[n]
-            prim = len(upcells)
-            if np.in1d(upcells, self.k).any():
-                sec = np.concatenate(self.branches.loc[upcells].dropna().values).size
-            else:
-                sec = 0
-            return prim + sec
-
-        primary =  iterange[~(iterange.isin(self.k)) & (iterange.isin(self.u))]
-        intermediate = iterange[(iterange.isin(self.k)) & (iterange.isin(self.u))]
-        terminal = iterange[(iterange.isin(self.k)) & ~(iterange.isin(self.u))]
-        noflow = iterange[~(iterange.isin(self.k)) & ~(iterange.isin(self.u))]
-
-        intermediate = self.branches[intermediate.values].apply(len)
+        intermediate = recursive_inter(intermediate)
 
         primary[:] = 0
         noflow[:] = 0
 
         for i in range(self.pos.shape[1]):
-            primary[np.in1d(primary.index.values, self.pos[:,i])] += i
-            intermediate[np.in1d(intermediate.index.values, self.pos[:,i])] += i
+            primary = primary + np.where(np.in1d(primary.index.values, self.pos[:,i]), i, 0)
+            intermediate = intermediate + np.where(np.in1d(intermediate.index.values, self.pos[:,i]), i, 0)
 
-        termsel = self.branches[terminal.values]
-        termidx = np.repeat(termsel.index.values, termsel.apply(len).values)
-        termsel = np.concatenate(termsel.values)
-        term_in = np.where(np.in1d(termsel, self.k))
-        upcells = self.branches[termsel[term_in]].apply(len).values
 
-        s1 = pd.Series(np.ones(termsel.size), index=termidx).reset_index().groupby('index').count()[0]
-        s2 = pd.Series(upcells, index=termidx[term_in]).reset_index().groupby('index').sum()[0].reindex(s1.index).fillna(0)
+        upcells = pd.concat([primary, intermediate]).sort_index()
 
-        terminal = s1 + s2
-#        terminal = terminal.apply(get_accumulation_t) #This is the one that takes forever!
+        # def recursive_(src):
+        #     termsel = self.branches[terminal.values]
+        #     termidx = np.repeat(termsel.index.values, termsel.apply(len).values)
+        #     termsel = np.concatenate(termsel.values)
+        #     term_in = np.where(np.in1d(termsel, self.branches.index.values))
+        #     upcells = self.branches[termsel[term_in]].apply(len).values
 
-        iterange = pd.concat([primary, intermediate, terminal, noflow]).sort_index().values
+        #     s1 = pd.Series(np.ones(termsel.size), index=termidx).reset_index().groupby('index').count()[0]
+        #     s2 = pd.Series(upcells, index=termidx[term_in]).reset_index().groupby('index').sum()[0].reindex(s1.index).fillna(0)
+        #     terminal = s1 + s2
+        #     return terminal
+
+        # terminal = recursive_(terminal)
+        
+        termvals = self.branches[terminal.values]
+        term = pd.Series(np.concatenate(termvals.values), np.repeat(terminal.index.values, termvals.apply(len)))
+        term = term.map(upcells).reset_index().groupby('index').sum()[0].sort_index()
+        termvals = termvals.apply(len).sort_index()
+
+        terminal = termvals + term
+
+        iterange = pd.concat([upcells, terminal, noflow]).sort_index().values
 
         return iterange.reshape(self.d.shape)
 
