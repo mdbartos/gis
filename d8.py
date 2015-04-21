@@ -1,11 +1,12 @@
 import numpy as np
 import pandas as pd
+import sys
 
-g = np.random.uniform(200,210,10000).reshape(100,100)
+g = np.random.uniform(300,500,1000000).reshape(1000,1000)
 
 class d8():
         
-    def __init__(self, data, data_type='dem', input_type='ascii', band=1, nodata=-1, pour=9, bbox=None, autorun=False):
+    def __init__(self, data, data_type='dem', input_type='ascii', band=1, nodata=0, pour=9, bbox=None, autorun=False):
 
         if input_type == 'ascii':
             pass
@@ -31,10 +32,12 @@ class d8():
                 self.bbox = bbox
             else:
                 self.bbox = (0, 0, data.shape[0], data.shape[1])
-	
+        
+        self.shape_min = np.min_scalar_type(max(self.data.shape))
+        self.size_min = np.min_scalar_type(self.data.size)
         self.pour = pour
         self.nodata = nodata    
-        self.idx = np.indices(self.data.shape)
+        self.idx = np.indices(self.data.shape, dtype=self.shape_min)
 
         if autorun == True:
             if input_type == 'dem':
@@ -45,6 +48,9 @@ class d8():
             self.branches, self.pos = self.prep_accum()
             self.accumulation = self.accum()
             self.catchment = self.catch()
+
+    def update_progress(progress):
+        sys.stdout.write('\r[{0}] {1}%'.format('#'*(progress/10), progress))
 
     def clip_array(self, new_bbox, inplace=False):
         df = pd.DataFrame(self.data,
@@ -146,19 +152,18 @@ class d8():
 
     def prep_accum(self):
 
-        coverage = np.full(self.d.size, -1)
-        ravel_d = self.d.ravel()
-#        iterarr = np.vstack(np.dstack(self.idx)) 
-        iterange = np.arange(self.d.size) 
-        outer = pd.Series(index=iterange).apply(lambda x: [])
+        coverage = np.full(self.d.size, np.iinfo(self.size_min).max, dtype=self.size_min)
+        self.d = self.d.ravel()
+        outer = pd.Series(index=np.arange(self.d.size,
+                                          dtype=self.size_min)).apply(lambda x: [])
 
         def goto_cell_r(i):
             inner.append(i)
             dirs = [[0,0], [-1,0], [-1,1], [0,1], [1,1],
             [1,0], [1,-1], [0,-1], [-1,-1]]
-            move = dirs[ravel_d[i]]
-            next_i = i + move[1] + move[0]*self.d.shape[1]
-            if ravel_d[i] == self.nodata:
+            move = dirs[self.d[i]]
+            next_i = i + move[1] + move[0]*self.shape[1]
+            if self.d[i] == self.nodata:
                 return i
 #            elif (next_cell < 0).any(): #SHOULD ALSO ACCOUNT FOR N > SHAPE[0], SHAPE[1]
 #                return i
@@ -170,7 +175,8 @@ class d8():
 
         def pad_inner(lst, dtype=np.int64):
             inner_max_len = max(map(len, lst))
-            result = np.full([len(lst), inner_max_len], -1)
+            result = np.full([len(lst), inner_max_len],
+                              np.iinfo(self.size_min).max, dtype=self.size_min)
             for i, row in enumerate(lst):
                 for j, val in enumerate(row):
                     result[i][j] = val
@@ -186,24 +192,24 @@ class d8():
             b[i],
             ((0,0), (0, ms-b[i].shape[1])),
             mode='constant',
-            constant_values=self.nodata)
+            constant_values=np.iinfo(self.size_min).max)
             return np.vstack(b)
 
-        for w in iterange:
+        for w in outer.index:
             if coverage[w] != w:
                 inner = []
                 coverage[w] = w
-#                v = iterarr[w]
-                if ravel_d[w] != self.nodata:
+                if self.d[w] != self.nodata:
                     h = goto_cell_r(w)
-    #                if not h in outer.index.values:
-    #                    outer.update({h : []})
+#                    print w
                     inner = np.array(inner)
                     inner = inner[np.where(inner != h)] #EXPENSIVE
                     outer[h].append(inner)
         
         outer = outer.apply(np.array)
         outer = outer[outer.str.len() > 0]
+
+        self.d = self.d.reshape(self.shape)
 
         return (outer.apply(np.concatenate),
                 pad_outer(np.array([pad_inner(i) for i in outer.values])).astype(int))
@@ -241,7 +247,7 @@ class d8():
         terminal = iterange[(iterange.isin(self.k)) & ~(iterange.isin(self.u))]
         noflow = iterange[~(iterange.isin(self.k)) & ~(iterange.isin(self.u))]
 
-        intermediate = intermediate.apply(get_accumulation_i)
+        intermediate = self.branches[intermediate.values].apply(len)
 
         primary[:] = 0
         noflow[:] = 0
@@ -249,8 +255,18 @@ class d8():
         for i in range(self.pos.shape[1]):
             primary[np.in1d(primary.index.values, self.pos[:,i])] += i
             intermediate[np.in1d(intermediate.index.values, self.pos[:,i])] += i
- 
-        terminal = terminal.apply(get_accumulation_t)
+
+        termsel = self.branches[terminal.values]
+        termidx = np.repeat(termsel.index.values, termsel.apply(len).values)
+        termsel = np.concatenate(termsel.values)
+        term_in = np.where(np.in1d(termsel, self.k))
+        upcells = self.branches[termsel[term_in]].apply(len).values
+
+        s1 = pd.Series(np.ones(termsel.size), index=termidx).reset_index().groupby('index').count()[0]
+        s2 = pd.Series(upcells, index=termidx[term_in]).reset_index().groupby('index').sum()[0].reindex(s1.index).fillna(0)
+
+        terminal = s1 + s2
+#        terminal = terminal.apply(get_accumulation_t) #This is the one that takes forever!
 
         iterange = pd.concat([primary, intermediate, terminal, noflow]).sort_index().values
 
