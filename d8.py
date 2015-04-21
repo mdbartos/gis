@@ -148,7 +148,7 @@ class d8():
 
         coverage = np.full(self.d.size, -1)
         ravel_d = self.d.ravel()
-        iterarr = np.vstack(np.dstack(self.idx)) 
+#        iterarr = np.vstack(np.dstack(self.idx)) 
         iterange = np.arange(self.d.size) 
         outer = pd.Series(index=iterange).apply(lambda x: [])
 
