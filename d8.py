@@ -329,3 +329,26 @@ class d8():
                              self.d.ravel(), self.nodata)
         catchment[n] = self.pour
         return catchment.reshape(self.d.shape)
+
+dshape = d.shape
+s = d.ravel()
+
+def select_surround_ravel(i):
+    return np.array([i + 0 - dshape[1], i + 1 - dshape[1], i + 1 + 0, i + 1 + dshape[1], i + 0 + dshape[1], i - 1 + dshape[1], i -1 + 0, i - 1 - dshape[1]])
+
+#def catchment(j):
+#    selection = select_surround_ravel(j)
+#    return selection[np.where(s[selection] == [5,6,7,8,1,2,3,4])]
+
+q.collect = np.array([])
+
+def catchment_r(j):
+    q.collect = np.append(q.collect, j)
+    selection = select_surround_ravel(j)
+    next_idx = selection[np.where(s[selection] == [5,6,7,8,1,2,3,4])]
+    if next_idx.any():
+        return catchment_r(next_idx)
+
+outcatch = np.zeros(d.shape)
+q.collect = q.collect.astype(int)
+outcatch.ravel()[q.collect] = d.ravel()[q.collect]
