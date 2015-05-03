@@ -46,8 +46,8 @@ class d8():
     def __repr__(self):
         return repr(self.dir)
 
-    def clip_array(self, new_bbox, inplace=False):
-        df = pd.DataFrame(self.data,
+    def clip_array(self, data, new_bbox, inplace=False):
+        df = pd.DataFrame(data,
                           index=np.linspace(self.bbox[1], self.bbox[3],
                                 self.shape[0], endpoint=False),
                           columns=np.linspace(self.bbox[0], self.bbox[2],
@@ -58,9 +58,10 @@ class d8():
             return df
 
         else:
+#NOT WORKING
             self.data = df.values
             self.bbox = new_bbox
-            self.shape = self.shape
+            self.shape = self.data.shape
 
     def flowdir(self, data, include_edges):
 
@@ -162,18 +163,13 @@ class d8():
                              i + 0 + padshape[1],
                              i - 1 + padshape[1],
                              i - 1 + 0,
-                             i - 1 - padshape[1]])
+                             i - 1 - padshape[1]]).T
 
 
         def catchment_search(j):
             self.collect = np.append(self.collect, j)
             selection = select_surround_ravel(j)
-	    #HACKY FIX
-            if selection.ndim > 1:
-                if (selection.shape[1] != 8) and (selection.shape[0] == 8):
-                    selection = selection.T
             next_idx = selection[np.where(self.dir[selection] == [5,6,7,8,1,2,3,4])]
-	    print next_idx
             if next_idx.any():
                 return catchment_search(next_idx)
 
