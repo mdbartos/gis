@@ -48,10 +48,10 @@ class d8():
 
     def clip_array(self, new_bbox, inplace=False):
         df = pd.DataFrame(self.data,
-                          index=np.linspace(b.bbox[1], b.bbox[3],
-                                b.shape[0], endpoint=False),
-                          columns=np.linspace(b.bbox[0], b.bbox[2],
-                                b.shape[1], endpoint=False))
+                          index=np.linspace(self.bbox[1], self.bbox[3],
+                                self.shape[0], endpoint=False),
+                          columns=np.linspace(self.bbox[0], self.bbox[2],
+                                self.shape[1], endpoint=False))
         df = df.loc[new_bbox[1]:new_bbox[3], new_bbox[0]:new_bbox[2]]
 
         if inplace == False:
@@ -60,7 +60,7 @@ class d8():
         else:
             self.data = df.values
             self.bbox = new_bbox
-            self.shape = self.data.shape
+            self.shape = self.shape
 
     def flowdir(self, data, include_edges):
 
@@ -68,16 +68,16 @@ class d8():
         corner = {
         'nw' : {'k' : tuple(self.idx[:,0,0]),
                 'v' : [[0,1,1], [1,1,0]],
-    	        'pad': np.array([3,4,5])},
+                'pad': np.array([3,4,5])},
         'ne' : {'k' : tuple(self.idx[:,0,-1]),
                 'v' : [[1,1,0], [-1,-2,-2]],
-    	        'pad': np.array([5,6,7])},
+                'pad': np.array([5,6,7])},
         'sw' : {'k' : tuple(self.idx[:,-1,0]),
                 'v' : [[-2,-2,-1], [0,1,1]],
-    	        'pad': np.array([1,2,3])},
+                'pad': np.array([1,2,3])},
         'se' : {'k' : tuple(self.idx[:,-1,-1]),
                 'v' : [[-1,-2,-2], [-2,-2,-1]],
-    	        'pad': np.array([7,8,1])}
+                'pad': np.array([7,8,1])}
         }
     
         #edges
@@ -151,6 +151,7 @@ class d8():
         self.collect = np.array([], dtype=int)
         self.dir = np.pad(self.dir, 1, mode='constant')
         padshape = self.dir.shape
+	self.dir = self.dir.ravel()
         pour_point = np.ravel_multi_index(np.array([y+1, x+1]), padshape)
 
         def select_surround_ravel(i):
@@ -167,14 +168,19 @@ class d8():
         def catchment_search(j):
             self.collect = np.append(self.collect, j)
             selection = select_surround_ravel(j)
-            next_idx = selection[np.where(self.dir.flat[selection] == [5,6,7,8,1,2,3,4])]
+	    #HACKY FIX
+            if selection.ndim > 1:
+                if (selection.shape[1] != 8) and (selection.shape[0] == 8):
+                    selection = selection.T
+            next_idx = selection[np.where(self.dir[selection] == [5,6,7,8,1,2,3,4])]
+	    print next_idx
             if next_idx.any():
                 return catchment_search(next_idx)
 
         catchment_search(pour_point)
         outcatch = np.zeros(padshape, dtype=np.int8)
-        outcatch.flat[self.collect] = self.dir.flat[self.collect]
-        self.dir = self.dir[1:-1, 1:-1]
+        outcatch.flat[self.collect] = self.dir[self.collect]
+        self.dir = self.dir.reshape(padshape)[1:-1, 1:-1]
         outcatch = outcatch[1:-1, 1:-1]
         del self.collect
 
