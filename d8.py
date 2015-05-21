@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import sys
+import ast
 
 g = np.random.uniform(300,500,100).reshape(10,10)
 
@@ -9,7 +10,16 @@ class d8():
     def __init__(self, data, data_type='dem', input_type='ascii', band=1, nodata=0, bbox=None, include_edges=True):
 
         if input_type == 'ascii':
-            pass
+            with open(data) as header:
+                ncols = int(header.readline().split()[1])
+                nrows = int(header.readline().split()[1])
+                xll = ast.literal_eval(header.readline().split()[1])
+                yll = ast.literal_eval(header.readline().split()[1])
+                self.cellsize = ast.literal_eval(header.readline().split()[1])
+                self.fill = ast.literal_eval(header.readline().split()[1])
+                self.shape = (nrows, ncols)
+                self.bbox = (xll, yll, xll + ncols*self.cellsize, yll + nrows*self.cellsize)
+            data = np.loadtxt(data, skiprows=6)
 
         if input_type == 'raster':
             import rasterio
@@ -18,6 +28,7 @@ class d8():
             self.bbox = tuple(f.bounds)
             self.shape = f.shape
             self.fill = f.nodatavals[0]
+            self.cellsize = f.affine[0]    #ASSUMES THAT CELLS ARE SQUARE
             if len(f.indexes) > 1:
                 data = np.ma.filled(f.read_band(band))
             else:
@@ -147,11 +158,13 @@ class d8():
     
         return outmap
 
-    def catchment(self, x, y, pour_value=None, dirmap=[5,6,7,8,1,2,3,4]):
+    def catchment(self, x, y, pour_value=None, dirmap=[5,6,7,8,1,2,3,4], recursionlimit=15000):
 
+        sys.setrecursionlimit(recursionlimit)
         self.collect = np.array([], dtype=int)
         self.dir = np.pad(self.dir, 1, mode='constant')
         padshape = self.dir.shape
+        # KEEP IN MIND THAT WHEN AN EXCEPTION IS RAISED IT SCREWS EVERYTHING UP IN PLACE
 	self.dir = self.dir.ravel()
         pour_point = np.ravel_multi_index(np.array([y+1, x+1]), padshape)
 
@@ -183,5 +196,25 @@ class d8():
         if pour_value is not None:
             outcatch[y,x] = pour_value 
         return outcatch
-        
-resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+
+b = d8('./na_dir_30s/DRT_8th_FDR_globe.asc', data_type='flowdir', input_type='ascii')
+q = d8('./na_dir_30s/na_dir_30s/w001001.adf', data_type='flowdir', input_type='raster')
+catch = q.catchment(5831, 3797, 9, [4, 8, 16, 32, 64, 128, 1, 2], recursionlimit=15000)
+nz = np.nonzero(catch)
+#nz = np.column_stack([nz[1], nz[0]])
+
+cell_ratio = int(b.cellsize/q.cellsize)
+
+q_index = np.linspace(q.bbox[1], q.bbox[3], q.shape[0], endpoint=False)
+q_columns = np.linspace(q.bbox[0], q.bbox[2], q.shape[1], endpoint=False)
+qdf = pd.DataFrame(q.dir, index=q_index, columns=q_columns)
+
+b_index = np.linspace(b.bbox[1], b.bbox[3], b.shape[0], endpoint=False)
+b_columns = np.linspace(b.bbox[0], b.bbox[2], b.shape[1], endpoint=False)
+bdf = pd.DataFrame(np.arange(b.dir.size).reshape(b.shape), index=b_index, columns=b_columns)
+
+bri = bdf.reindex(qdf.index, method='nearest').reindex_axis(qdf.columns, axis=1, method='nearest')
+result_idx = bri.values[np.where(catch != 0, True, False)]
+
+### VIOLA!!!
+result = (np.bincount(result_idx, minlength=bdf.size).astype(float)/(cell_ratio**2)).reshape(bdf.shape)
