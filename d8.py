@@ -2,13 +2,19 @@ import numpy as np
 import pandas as pd
 import sys
 import ast
+from scipy import ndimage
 
 g = np.random.uniform(300,500,100).reshape(10,10)
 
 class d8():        
 
-    def __init__(self, data, data_type='dem', input_type='ascii', band=1, nodata=0, bbox=None, include_edges=True):
+    def __init__(self, **kwargs):
+        if kwargs['data']:
+            self.read_input(**kwargs)
+        else:
+            pass
 
+    def read_input(self, data, data_type='dir', input_type='ascii', band=1, nodata=0, bbox=None):
         if input_type == 'ascii':
             with open(data) as header:
                 ncols = int(header.readline().split()[1])
@@ -40,41 +46,26 @@ class d8():
             self.shape = data.shape
             if bbox:
                 self.bbox = bbox
-#            MIGHT BE CONFUSING
-#            else:
-#                self.bbox = (0, 0, self.shape[0], self.shape[1])
             
         self.shape_min = np.min_scalar_type(max(self.shape))
         self.size_min = np.min_scalar_type(data.size)
         self.nodata = nodata    
         self.idx = np.indices(self.shape, dtype=self.shape_min)
-
-        if data_type == 'dem':
-            self.dir = self.flowdir(data, include_edges=include_edges)
-        elif data_type == 'flowdir':
-            self.dir = data
+        setattr(self, data_type, data)
 
     def __repr__(self):
         return repr(self.dir)
 
-    def clip_array(self, data, new_bbox, inplace=False):
+    def clip_array(self, data, new_bbox):
         df = pd.DataFrame(data,
                           index=np.linspace(self.bbox[1], self.bbox[3],
                                 self.shape[0], endpoint=False),
                           columns=np.linspace(self.bbox[0], self.bbox[2],
                                 self.shape[1], endpoint=False))
         df = df.loc[new_bbox[1]:new_bbox[3], new_bbox[0]:new_bbox[2]]
+        return df
 
-        if inplace == False:
-            return df
-
-        else:
-#NOT WORKING
-            self.data = df.values
-            self.bbox = new_bbox
-            self.shape = self.data.shape
-
-    def flowdir(self, data, include_edges):
+    def flowdir(self, data, include_edges, dirmap=[1,2,3,4,5,6,7,8]):
 
         #corners
         corner = {
@@ -156,16 +147,19 @@ class d8():
                 c = self.nodata
                 outmap[edge[x]['k']] = np.where(a,b,c)
     
+        if dirmap != [1,2,3,4,5,6,7,8]:
+            dir_d = dict(zip([1,2,3,4,5,6,7,8], dirmap))
+            outmap = pd.DataFrame(outmap).apply(lambda x: x.map(dir_d), axis=1).values
+
         return outmap
 
-    def catchment(self, x, y, pour_value=None, dirmap=[5,6,7,8,1,2,3,4], recursionlimit=15000):
+    def catchment(self, x, y, pour_value=None, dirmap=[5,6,7,8,1,2,3,4], recursionlimit=15000, inplace=True):
 
         sys.setrecursionlimit(recursionlimit)
         self.collect = np.array([], dtype=int)
-        self.dir = np.pad(self.dir, 1, mode='constant')
-        padshape = self.dir.shape
-        # KEEP IN MIND THAT WHEN AN EXCEPTION IS RAISED IT SCREWS EVERYTHING UP IN PLACE
-	self.dir = self.dir.ravel()
+        self.cdir = np.pad(self.dir, 1, mode='constant')
+        padshape = self.cdir.shape
+	self.cdir = self.cdir.ravel()
         pour_point = np.ravel_multi_index(np.array([y+1, x+1]), padshape)
 
         def select_surround_ravel(i):
@@ -182,39 +176,52 @@ class d8():
         def catchment_search(j):
             self.collect = np.append(self.collect, j)
             selection = select_surround_ravel(j)
-            next_idx = selection[np.where(self.dir[selection] == dirmap)]
+            next_idx = selection[np.where(self.cdir[selection] == dirmap)]
             if next_idx.any():
                 return catchment_search(next_idx)
 
         catchment_search(pour_point)
         outcatch = np.zeros(padshape, dtype=np.int16)
-        outcatch.flat[self.collect] = self.dir[self.collect]
-        self.dir = self.dir.reshape(padshape)[1:-1, 1:-1]
+        outcatch.flat[self.collect] = self.cdir[self.collect]
+#        self.cdir = self.cdir.reshape(padshape)[1:-1, 1:-1]
         outcatch = outcatch[1:-1, 1:-1]
+        del self.cdir
         del self.collect
 
         if pour_value is not None:
             outcatch[y,x] = pour_value 
-        return outcatch
 
-b = d8('./na_dir_30s/DRT_8th_FDR_globe.asc', data_type='flowdir', input_type='ascii')
-q = d8('./na_dir_30s/na_dir_30s/w001001.adf', data_type='flowdir', input_type='raster')
-catch = q.catchment(5831, 3797, 9, [4, 8, 16, 32, 64, 128, 1, 2], recursionlimit=15000)
-nz = np.nonzero(catch)
-#nz = np.column_stack([nz[1], nz[0]])
+        if inplace == True:
+            self.catch = outcatch
+        else:
+            return outcatch
 
-cell_ratio = int(b.cellsize/q.cellsize)
+    def fraction(self, other, inplace=True):
 
-q_index = np.linspace(q.bbox[1], q.bbox[3], q.shape[0], endpoint=False)
-q_columns = np.linspace(q.bbox[0], q.bbox[2], q.shape[1], endpoint=False)
-qdf = pd.DataFrame(q.dir, index=q_index, columns=q_columns)
+        assert hasattr(self, 'dir')
+        assert hasattr(other, 'dir')
+        assert hasattr(other, 'catch')
 
-b_index = np.linspace(b.bbox[1], b.bbox[3], b.shape[0], endpoint=False)
-b_columns = np.linspace(b.bbox[0], b.bbox[2], b.shape[1], endpoint=False)
-bdf = pd.DataFrame(np.arange(b.dir.size).reshape(b.shape), index=b_index, columns=b_columns)
+        cell_ratio = int(self.cellsize/other.cellsize)
+        selfdf = pd.DataFrame(
+                np.arange(self.dir.size).reshape(self.shape),
+                index=np.linspace(self.bbox[1], self.bbox[3],
+                                  self.shape[0], endpoint=False),
+                columns=np.linspace(self.bbox[0], self.bbox[2],
+                                    self.shape[1], endpoint=False)
+                )
+        otherdf = pd.DataFrame(
+                other.dir,
+                index=np.linspace(other.bbox[1], other.bbox[3],
+                                  other.shape[0], endpoint=False),
+                columns=np.linspace(other.bbox[0], other.bbox[2],
+                                    other.shape[1], endpoint=False)
+                )
+        result = selfdf.reindex(otherdf.index, method='nearest').reindex_axis(otherdf.columns, axis=1, method='nearest')
+        result = result.values[np.where(other.catch != 0, True, False)]
+        result = (np.bincount(result, minlength=selfdf.size).astype(float)/(cell_ratio**2)).reshape(selfdf.shape)
 
-bri = bdf.reindex(qdf.index, method='nearest').reindex_axis(qdf.columns, axis=1, method='nearest')
-result_idx = bri.values[np.where(catch != 0, True, False)]
-
-### VIOLA!!!
-result = (np.bincount(result_idx, minlength=bdf.size).astype(float)/(cell_ratio**2)).reshape(bdf.shape)
+        if inplace == True:
+            self.frac = result
+        else:
+            return result
