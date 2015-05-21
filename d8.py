@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 import sys
 import ast
-from scipy import ndimage
 
 g = np.random.uniform(300,500,100).reshape(10,10)
 
@@ -55,6 +54,19 @@ class d8():
 
     def __repr__(self):
         return repr(self.dir)
+
+    def nearest_cell(self, lon, lat):
+
+        coords = np.meshgrid(
+            np.linspace(self.bbox[0], self.bbox[2],
+                        self.shape[1], endpoint=False),
+            np.linspace(self.bbox[1], self.bbox[3],
+                        self.shape[0], endpoint=False)[::-1])
+
+        nearest = np.unravel_index(np.argmin(np.sqrt((
+                                   coords[0] - lon)**2 + (coords[1] - lat)**2)),
+                                   self.shape)
+        return nearest
 
     def clip_array(self, data, new_bbox):
         df = pd.DataFrame(data,
@@ -206,14 +218,14 @@ class d8():
         selfdf = pd.DataFrame(
                 np.arange(self.dir.size).reshape(self.shape),
                 index=np.linspace(self.bbox[1], self.bbox[3],
-                                  self.shape[0], endpoint=False),
+                                  self.shape[0], endpoint=False)[::-1],
                 columns=np.linspace(self.bbox[0], self.bbox[2],
                                     self.shape[1], endpoint=False)
                 )
         otherdf = pd.DataFrame(
                 other.dir,
                 index=np.linspace(other.bbox[1], other.bbox[3],
-                                  other.shape[0], endpoint=False),
+                                  other.shape[0], endpoint=False)[::-1],
                 columns=np.linspace(other.bbox[0], other.bbox[2],
                                     other.shape[1], endpoint=False)
                 )
