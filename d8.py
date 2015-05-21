@@ -23,7 +23,7 @@ class d8():
             else:
                 data = np.ma.filled(f.read())
                 f.close()
-                data = self.data.reshape(self.shape)
+                data = data.reshape(self.shape)
 
         if input_type == 'array':
             self.shape = data.shape
@@ -147,7 +147,7 @@ class d8():
     
         return outmap
 
-    def catchment(self, x, y, pour_value=None):
+    def catchment(self, x, y, pour_value=None, dirmap=[5,6,7,8,1,2,3,4]):
 
         self.collect = np.array([], dtype=int)
         self.dir = np.pad(self.dir, 1, mode='constant')
@@ -169,12 +169,12 @@ class d8():
         def catchment_search(j):
             self.collect = np.append(self.collect, j)
             selection = select_surround_ravel(j)
-            next_idx = selection[np.where(self.dir[selection] == [5,6,7,8,1,2,3,4])]
+            next_idx = selection[np.where(self.dir[selection] == dirmap)]
             if next_idx.any():
                 return catchment_search(next_idx)
 
         catchment_search(pour_point)
-        outcatch = np.zeros(padshape, dtype=np.int8)
+        outcatch = np.zeros(padshape, dtype=np.int16)
         outcatch.flat[self.collect] = self.dir[self.collect]
         self.dir = self.dir.reshape(padshape)[1:-1, 1:-1]
         outcatch = outcatch[1:-1, 1:-1]
@@ -183,3 +183,5 @@ class d8():
         if pour_value is not None:
             outcatch[y,x] = pour_value 
         return outcatch
+        
+resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
