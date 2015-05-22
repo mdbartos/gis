@@ -3,7 +3,6 @@ import pandas as pd
 import sys
 import ast
 
-g = np.random.uniform(300,500,100).reshape(10,10)
 
 class flow_grid():        
     """
@@ -297,7 +296,7 @@ class flow_grid():
         padshape = self.cdir.shape
 	self.cdir = self.cdir.ravel()
         pour_point = np.ravel_multi_index(np.array([y+1, x+1]), padshape)
-        dirmap = np.array(dirmap)[[5,6,7,8,1,2,3,4]].tolist()
+        dirmap = np.array(dirmap)[[4,5,6,7,0,1,2,3]].tolist()
 
         def select_surround_ravel(i):
             return np.array([i + 0 - padshape[1],
