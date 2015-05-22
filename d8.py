@@ -3,7 +3,6 @@ import pandas as pd
 import sys
 import ast
 
-g = np.random.uniform(300,500,100).reshape(10,10)
 
 class flow_grid():        
     """
@@ -57,7 +56,8 @@ class flow_grid():
                direction grid.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, conform_data=True, **kwargs):
+        self.conform_data = conform_data
         self.gridlist = []
         if 'data' in kwargs:
             self.read_input(**kwargs)
@@ -97,7 +97,7 @@ class flow_grid():
                 xll = ast.literal_eval(header.readline().split()[1])
                 yll = ast.literal_eval(header.readline().split()[1])
                 cellsize = ast.literal_eval(header.readline().split()[1])
-                fill = ast.literal_eval(header.readline().split()[1])
+                nodata = ast.literal_eval(header.readline().split()[1])
                 shape = (nrows, ncols)
                 bbox = (xll, yll, xll + ncols*cellsize, yll + nrows*cellsize)
             data = np.loadtxt(data, skiprows=6)
@@ -108,7 +108,7 @@ class flow_grid():
             crs = f.crs
             bbox = tuple(f.bounds)
             shape = f.shape
-            fill = f.nodatavals[0]
+            nodata = f.nodatavals[0]
             cellsize = f.affine[0]
             if len(f.indexes) > 1:
                 data = np.ma.filled(f.read_band(band))
@@ -127,13 +127,14 @@ class flow_grid():
             self.crs = crs
             self.nodata = nodata
         else:
-            np.testing.assert_almost_equal(cellsize, self.cellsize)
-            try:
-                np.testing.assert_almost_equal(bbox, self.bbox)
-            except:
-                data = self.conform(data, bbox)
-                shape = data.shape
-            assert(shape == self.shape)
+            if self.conform_data == True:
+                np.testing.assert_almost_equal(cellsize, self.cellsize)
+                try:
+                    np.testing.assert_almost_equal(bbox, self.bbox)
+                except:
+                    data = self.conform(data, bbox, fill=nodata)
+                    shape = data.shape
+                assert(shape == self.shape)
 
         self.shape_min = np.min_scalar_type(max(self.shape))
         self.size_min = np.min_scalar_type(data.size)
@@ -395,7 +396,7 @@ class flow_grid():
         else:
             return result
 
-    def conform(self, data, bbox, precision=7, fillna=True):
+    def conform(self, data, bbox, precision=7, fillna=True, fill=0):
         selfrows = np.around(np.linspace(self.bbox[1], self.bbox[3], self.shape[0], endpoint=False)[::-1], precision)
         selfcols = np.around(np.linspace(self.bbox[0], self.bbox[2], self.shape[1], endpoint=False), precision)
         rows = np.around(np.linspace(bbox[1], bbox[3], data.shape[0], endpoint=False)[::-1], precision)
@@ -403,14 +404,29 @@ class flow_grid():
         data = pd.DataFrame(data, index=rows, columns=cols)
         data = data.reindex(selfrows).reindex_axis(selfcols, axis=1)
         if fillna == True:
-            return data.fillna(self.nodata).values
+            return data.fillna(fill).values
         else:
             return data.values
 
-    def clip_zeros(self, data, retix=True):
+    def clip_zeros(self, data, return_ix=True):
         nz = nonzero(data)
         nz_ix = (nz[0].min(), nz[0].max(), nz[1].min(), nz[1].max())
-        if retix == True:
-            return data[nz_ix[0]:nz_ix[1], nz_ix[2]:nz_ix[3]], nz_ix
+        if return_ix == True:
+            return nz_ix
         else:
             return data[nz_ix[0]:nz_ix[1], nz_ix[2]:nz_ix[3]]
+
+    def set_bbox(self, new_bbox, clip_to='bbox', precision=7, fillna=True, fill=0): 
+        new_bbox = np.around(new_bbox, precision)
+        selfrows = np.around(np.linspace(self.bbox[1], self.bbox[3], self.shape[0], endpoint=False)[::-1], precision)
+        selfcols = np.around(np.linspace(self.bbox[0], self.bbox[2], self.shape[1], endpoint=False), precision)
+        rows = pd.Series(selfrows, index=selfrows).loc[new_bbox[3]:new_bbox[1]].values 
+        cols = pd.Series(selfcols, index=selfcols).loc[new_bbox[0]:new_bbox[2]].values
+        for i in self.gridlist:
+            data = pd.DataFrame(getattr(self, i), index=selfrows, columns=selfcols)
+            if clip_to == 'data':
+                data = data.loc[new_bbox[3]:new_bbox[1], new_bbox[0]:new_bbox[2]].values
+            elif clip_to == 'bbox':
+                data = data.reindex(rows).reindex_axis(cols, axis=1) #NEED TO HANDLE FILLING
+            setattr(self, i, data)
+        self.bbox = tuple(new_bbox)
