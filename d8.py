@@ -3,6 +3,7 @@ import pandas as pd
 import sys
 import ast
 
+g = np.random.uniform(300,500,100).reshape(10,10)
 
 class flow_grid():        
     """
@@ -57,12 +58,13 @@ class flow_grid():
     """
 
     def __init__(self, **kwargs):
+        self.gridlist = []
         if 'data' in kwargs:
             self.read_input(**kwargs)
         else:
             pass
 
-    def read_input(self, data, data_type='dir', input_type='ascii', band=1, nodata=0, bbox=None):
+    def read_input(self, data, data_type='dir', input_type='ascii', band=1, nodata=0, bbox=None, crs=None, precision=7):
         """
         Reads data into a named attribute of flow_grid
         (name of attribute determined by 'data_type').
@@ -94,36 +96,49 @@ class flow_grid():
                 nrows = int(header.readline().split()[1])
                 xll = ast.literal_eval(header.readline().split()[1])
                 yll = ast.literal_eval(header.readline().split()[1])
-                self.cellsize = ast.literal_eval(header.readline().split()[1])
-                self.fill = ast.literal_eval(header.readline().split()[1])
-                self.shape = (nrows, ncols)
-                self.bbox = (xll, yll, xll + ncols*self.cellsize, yll + nrows*self.cellsize)
+                cellsize = ast.literal_eval(header.readline().split()[1])
+                fill = ast.literal_eval(header.readline().split()[1])
+                shape = (nrows, ncols)
+                bbox = (xll, yll, xll + ncols*cellsize, yll + nrows*cellsize)
             data = np.loadtxt(data, skiprows=6)
 
         if input_type == 'raster':
             import rasterio
             f = rasterio.open(data)
-            self.crs = f.crs
-            self.bbox = tuple(f.bounds)
-            self.shape = f.shape
-            self.fill = f.nodatavals[0]
-            self.cellsize = f.affine[0]
+            crs = f.crs
+            bbox = tuple(f.bounds)
+            shape = f.shape
+            fill = f.nodatavals[0]
+            cellsize = f.affine[0]
             if len(f.indexes) > 1:
                 data = np.ma.filled(f.read_band(band))
             else:
                 data = np.ma.filled(f.read())
                 f.close()
-                data = data.reshape(self.shape)
+                data = data.reshape(shape)
 
         if input_type == 'array':
-            self.shape = data.shape
-            if bbox:
-                self.bbox = bbox
+            shape = data.shape
             
+        if len(self.gridlist) < 1:
+            self.bbox = bbox
+            self.shape = shape
+            self.cellsize = cellsize
+            self.crs = crs
+            self.nodata = nodata
+        else:
+            np.testing.assert_almost_equal(cellsize, self.cellsize)
+            try:
+                np.testing.assert_almost_equal(bbox, self.bbox)
+            except:
+                return None
+            assert(shape == self.shape)
+
         self.shape_min = np.min_scalar_type(max(self.shape))
         self.size_min = np.min_scalar_type(data.size)
-        self.nodata = nodata    
         self.idx = np.indices(self.shape, dtype=self.shape_min)
+
+        self.gridlist.append(data_type)
         setattr(self, data_type, data)
 
     def nearest_cell(self, lon, lat):
@@ -152,7 +167,7 @@ class flow_grid():
                                    self.shape)
         return nearest[1], nearest[0]
 
-    def flowdir(self, data, include_edges, dirmap=[1,2,3,4,5,6,7,8]):
+    def flowdir(self, data=None, include_edges=True, dirmap=[1,2,3,4,5,6,7,8]):
         """
         Generates a flow direction grid from a DEM grid.
 
@@ -248,12 +263,15 @@ class flow_grid():
                 c = self.nodata
                 outmap[edge[x]['k']] = np.where(a,b,c)
     
-        # If dirmap isn't range(1,9), convert values of outmap.
+        # If direction numbering isn't default, convert values of output array.
         if dirmap != [1,2,3,4,5,6,7,8]:
             dir_d = dict(zip([1,2,3,4,5,6,7,8], dirmap))
             outmap = pd.DataFrame(outmap).apply(lambda x: x.map(dir_d), axis=1).values
-
-        return outmap
+        
+        if inplace == True:
+            self.dir = outmap
+        else:
+            return outmap
 
     def catchment(self, x, y, pour_value=None, dirmap=[1,2,3,4,5,6,7,8], xytype='index', recursionlimit=15000, inplace=True):
         """
@@ -375,3 +393,14 @@ class flow_grid():
             self.frac = result
         else:
             return result
+
+    def conform(self, data):
+        pass
+
+    def clip_zeros(self, data, retix=True):
+        nz = nonzero(data)
+        nz_ix = (nz[0].min(), nz[0].max(), nz[1].min(), nz[1].max())
+        if retix == True:
+            return data[nz_ix[0]:nz_ix[1], nz_ix[2]:nz_ix[3]], nz_ix
+        else:
+            return data[nz_ix[0]:nz_ix[1], nz_ix[2]:nz_ix[3]]
