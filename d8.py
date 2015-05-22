@@ -131,7 +131,8 @@ class flow_grid():
             try:
                 np.testing.assert_almost_equal(bbox, self.bbox)
             except:
-                return None
+                data = self.conform(data, bbox)
+                shape = data.shape
             assert(shape == self.shape)
 
         self.shape_min = np.min_scalar_type(max(self.shape))
@@ -394,8 +395,17 @@ class flow_grid():
         else:
             return result
 
-    def conform(self, data):
-        pass
+    def conform(self, data, bbox, precision=7, fillna=True):
+        selfrows = np.around(np.linspace(self.bbox[1], self.bbox[3], self.shape[0], endpoint=False)[::-1], precision)
+        selfcols = np.around(np.linspace(self.bbox[0], self.bbox[2], self.shape[1], endpoint=False), precision)
+        rows = np.around(np.linspace(bbox[1], bbox[3], data.shape[0], endpoint=False)[::-1], precision)
+        cols = np.around(np.linspace(bbox[0], bbox[2], data.shape[1], endpoint=False), precision)
+        data = pd.DataFrame(data, index=rows, columns=cols)
+        data = data.reindex(selfrows).reindex_axis(selfcols, axis=1)
+        if fillna == True:
+            return data.fillna(self.nodata).values
+        else:
+            return data.values
 
     def clip_zeros(self, data, retix=True):
         nz = nonzero(data)
