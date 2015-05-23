@@ -11,7 +11,8 @@ class flow_grid():
 
     Parameters
     ----------
-    data : File name (string) or numpy ndarray
+    data : string or numpy ndarray
+           Data to be read.
            If data is from a file, 'input_type' should be set to the appropriate value
            ('ascii' or 'raster').
     data_type : 'dem', 'dir', 'acc'
@@ -64,7 +65,7 @@ class flow_grid():
         else:
             pass
 
-    def read_input(self, data, data_type='dir', input_type='ascii', band=1, nodata=0, bbox=None, crs=None, precision=7):
+    def read_input(self, data, data_type='dir', input_type='ascii', band=1, nodata=0, bbox=None, crs=None, precision=7, **kwargs):
         """
         Reads data into a named attribute of flow_grid
         (name of attribute determined by 'data_type').
@@ -100,7 +101,7 @@ class flow_grid():
                 nodata = ast.literal_eval(header.readline().split()[1])
                 shape = (nrows, ncols)
                 bbox = (xll, yll, xll + ncols*cellsize, yll + nrows*cellsize)
-            data = np.loadtxt(data, skiprows=6)
+            data = np.loadtxt(data, skiprows=6, **kwargs)
             nodata = data.dtype.type(nodata)
 
         if input_type == 'raster':
@@ -312,8 +313,11 @@ class flow_grid():
             x, y = self.nearest_cell(x, y)
         sys.setrecursionlimit(recursionlimit)
         self.collect = np.array([], dtype=int)
-        self.cdir = np.pad(self.dir, 1, mode='constant',
-                           constant_values=np.asscalar(self.nodata['dir']))
+        try:
+            self.cdir = np.pad(self.dir, 1, mode='constant',
+                               constant_values=np.asscalar(self.nodata['dir']))
+        except:
+            self.cdir = np.pad(self.dir, 1, mode='constant')
         padshape = self.cdir.shape
         self.cdir = self.cdir.ravel()
         pour_point = np.ravel_multi_index(np.array([y+1, x+1]), padshape)
@@ -487,9 +491,15 @@ class flow_grid():
 
 
 
-#b = flow_grid(data='./na_dir_30s/DRT_8th_FDR_globe.asc', data_type='dir', input_type='ascii')
+b = flow_grid(data='DRT_8th_FDR_globe.asc', data_type='dir', input_type='ascii')
 q = flow_grid(data='./na_dir_30s/na_dir_30s/w001001.adf', data_type='dir', input_type='raster')
 q.read_input('./na_acc_30s/na_acc_30s/w001001.adf', data_type='acc', input_type='raster')
 q.read_input('./na_dem_30s/na_dem_30s/w001001.adf', data_type='dem', input_type='raster')
 
 q.catchment(5831, 3797, 9, [64, 128, 1, 2, 4, 8, 16, 32], recursionlimit=15000)
+
+q_index = np.linspace(q.bbox[1], q.bbox[3], q.shape[0], endpoint=False)[::-1]
+q_columns = np.linspace(q.bbox[0], q.bbox[2], q.shape[1], endpoint=False)
+qdf = pd.DataFrame(q.dir, index=q_index, columns=q_columns)
+
+b.catchment(q_columns[5831], q_index[3797], 9, [64, 128, 1, 2, 4, 8, 16, 32], xytype='label')
