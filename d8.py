@@ -3,7 +3,6 @@ import pandas as pd
 import sys
 import ast
 
-
 class flow_grid():        
     """
     Container class for holding and manipulating gridded VIC routing data.
@@ -430,3 +429,13 @@ class flow_grid():
                 data = data.reindex(rows).reindex_axis(cols, axis=1) #NEED TO HANDLE FILLING
             setattr(self, i, data)
         self.bbox = tuple(new_bbox)
+
+
+b = flow_grid(data='./na_dir_30s/DRT_8th_FDR_globe.asc', data_type='dir', input_type='ascii')
+q = flow_grid(data='./na_dir_30s/na_dir_30s/w001001.adf', data_type='dir', input_type='raster')
+q.read_input('./na_acc_30s/na_acc_30s/w001001.adf', data_type='acc', input_type='raster')
+q.read_input('./na_dem_30s/na_dem_30s/w001001.adf', data_type='dem', input_type='raster')
+
+z = flow_grid(data='./na_dem_30s/na_dem_30s/w001001.adf', data_type='dem', input_type='raster')
+
+q.catchment(5831, 3797, 9, [64, 128, 1, 2, 4, 8, 16, 32], recursionlimit=15000)
