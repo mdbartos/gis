@@ -57,6 +57,7 @@ class flow_grid():
 
     def __init__(self, conform_data=True, **kwargs):
         self.conform_data = conform_data
+        self.nodata = {}
         self.gridlist = []
         if 'data' in kwargs:
             self.read_input(**kwargs)
@@ -100,6 +101,7 @@ class flow_grid():
                 shape = (nrows, ncols)
                 bbox = (xll, yll, xll + ncols*cellsize, yll + nrows*cellsize)
             data = np.loadtxt(data, skiprows=6)
+            nodata = data.dtype.type(nodata)
 
         if input_type == 'raster':
             import rasterio
@@ -107,14 +109,15 @@ class flow_grid():
             crs = f.crs
             bbox = tuple(f.bounds)
             shape = f.shape
-            nodata = f.nodatavals[0]
             cellsize = f.affine[0]
+            nodata = f.nodatavals[0]
             if len(f.indexes) > 1:
                 data = np.ma.filled(f.read_band(band))
             else:
                 data = np.ma.filled(f.read())
                 f.close()
                 data = data.reshape(shape)
+            nodata = data.dtype.type(nodata)
 
         if input_type == 'array':
             shape = data.shape
@@ -124,7 +127,6 @@ class flow_grid():
             self.shape = shape
             self.cellsize = cellsize
             self.crs = crs
-            self.nodata = nodata
         else:
             if self.conform_data == True:
                 np.testing.assert_almost_equal(cellsize, self.cellsize)
@@ -140,6 +142,7 @@ class flow_grid():
         self.idx = np.indices(self.shape, dtype=self.shape_min)
 
         self.gridlist.append(data_type)
+        self.nodata.update({data_type : nodata})
         setattr(self, data_type, data)
 
     def nearest_cell(self, lon, lat):
@@ -274,7 +277,7 @@ class flow_grid():
         else:
             return outmap
 
-    def catchment(self, x, y, pour_value=None, dirmap=[1,2,3,4,5,6,7,8], xytype='index', recursionlimit=15000, inplace=True):
+    def catchment(self, x, y, pour_value=None, dirmap=[1,2,3,4,5,6,7,8], nodata=0, xytype='index', recursionlimit=15000, inplace=True):
         """
         Delineates a watershed from a given pour point (x, y).
         Returns a grid 
@@ -307,13 +310,12 @@ class flow_grid():
 
         if xytype == 'label':
             x, y = self.nearest_cell(x, y)
-        elif xytype == 'index':
-            pass
         sys.setrecursionlimit(recursionlimit)
         self.collect = np.array([], dtype=int)
-        self.cdir = np.pad(self.dir, 1, mode='constant')
+        self.cdir = np.pad(self.dir, 1, mode='constant',
+                           constant_values=np.asscalar(self.nodata['dir']))
         padshape = self.cdir.shape
-	self.cdir = self.cdir.ravel()
+        self.cdir = self.cdir.ravel()
         pour_point = np.ravel_multi_index(np.array([y+1, x+1]), padshape)
         dirmap = np.array(dirmap)[[4,5,6,7,0,1,2,3]].tolist()
 
@@ -336,7 +338,9 @@ class flow_grid():
                 return catchment_search(next_idx)
 
         catchment_search(pour_point)
-        outcatch = np.zeros(padshape, dtype=np.int16)
+        outcatch = np.zeros(padshape, dtype=int)
+        if nodata != 0:
+            np.place(outcatch, outcatch == 0, nodata)
         outcatch.flat[self.collect] = self.cdir[self.collect]
         outcatch = outcatch[1:-1, 1:-1]
         del self.cdir
@@ -347,23 +351,26 @@ class flow_grid():
 
         if inplace == True:
             self.catch = outcatch
+            self.nodata.update({'catch' : nodata})
+            self.gridlist.append('catch')
         else:
             return outcatch
 
-    def fraction(self, other, inplace=True):
+    def fraction(self, other, nodata=0, inplace=True):
         """
         Generates a grid representing the fractional contributing area for a
         coarse-scale flow direction grid.
 
         Parameters
         ----------
-        other : Another flow_grid instance containing fine-scale flow direction data.
+        other : flow_grid instance
+                Another flow_grid instance containing fine-scale flow direction data.
                 The ratio of self.cellsize/other.cellsize must be a positive integer.
                 Grid cell boundaries must have some overlap.
                 Must have attributes 'dir' and 'catch' (i.e. must have a flow direction grid,
                 along with a delineated catchment).
                 
-        inplace : bool
+        inplace : bool (optional)
                   If True, appends fraction grid to attribute 'frac'.
         """
 
@@ -390,8 +397,13 @@ class flow_grid():
         result = result.values[np.where(other.catch != 0, True, False)]
         result = (np.bincount(result, minlength=selfdf.size).astype(float)/(cell_ratio**2)).reshape(selfdf.shape)
 
+        if nodata != 0:
+            np.place(result, result == 0, nodata)
+
         if inplace == True:
             self.frac = result
+            self.nodata.update({'frac' : nodata})
+            self.gridlist.append('frac')
         else:
             return result
 
@@ -407,11 +419,16 @@ class flow_grid():
         else:
             return data.values
 
-    def clip_zeros(self, data, return_ix=True):
-        nz = nonzero(data)
+    def clip_nodata(self, data_name, inplace=True, precision=7, **kwargs):
+        data = getattr(self, data_name)
+        nodata = self.nodata[data_name]
+        nz = np.nonzero(data != nodata)
         nz_ix = (nz[0].min(), nz[0].max(), nz[1].min(), nz[1].max())
-        if return_ix == True:
-            return nz_ix
+        if inplace == True:
+            selfrows = np.around(np.linspace(self.bbox[1], self.bbox[3], self.shape[0], endpoint=False)[::-1], precision)
+            selfcols = np.around(np.linspace(self.bbox[0], self.bbox[2], self.shape[1], endpoint=False), precision)
+            new_bbox = (selfcols[nz_ix[2]], selfrows[nz_ix[1]], selfcols[nz_ix[3]], selfrows[nz_ix[0]])
+            self.set_bbox(new_bbox, **kwargs)
         else:
             return data[nz_ix[0]:nz_ix[1], nz_ix[2]:nz_ix[3]]
 
@@ -419,6 +436,7 @@ class flow_grid():
         new_bbox = np.around(new_bbox, precision)
         selfrows = np.around(np.linspace(self.bbox[1], self.bbox[3], self.shape[0], endpoint=False)[::-1], precision)
         selfcols = np.around(np.linspace(self.bbox[0], self.bbox[2], self.shape[1], endpoint=False), precision)
+        # NEED AN ASSERT HERE
         rows = pd.Series(selfrows, index=selfrows).loc[new_bbox[3]:new_bbox[1]].values 
         cols = pd.Series(selfcols, index=selfcols).loc[new_bbox[0]:new_bbox[2]].values
         for i in self.gridlist:
@@ -426,16 +444,52 @@ class flow_grid():
             if clip_to == 'data':
                 data = data.loc[new_bbox[3]:new_bbox[1], new_bbox[0]:new_bbox[2]].values
             elif clip_to == 'bbox':
-                data = data.reindex(rows).reindex_axis(cols, axis=1) #NEED TO HANDLE FILLING
+                data = data.reindex(rows).reindex_axis(cols, axis=1).fillna(self.nodata[i]).values
             setattr(self, i, data)
         self.bbox = tuple(new_bbox)
+        self.shape = tuple([len(rows), len(cols)])
+
+    def set_nodata(self, data_name, new_nodata, old_nodata=None):
+        if old_nodata is None:
+            old_nodata = self.nodata[data_name]
+        data = getattr(self, data_name)
+        np.place(data, data==old_nodata, new_nodata)
+        self.nodata.update({data_name : new_nodata})
+
+    def catchment_mask(self, to_mask, mask_source='catch'):
+        mask = (getattr(self, mask_source) == self.nodata[mask_source])
+        if isinstance(to_mask, str):
+            np.place(getattr(self, to_mask), mask, self.nodata[to_mask])
+        elif isinstance(to_mask, (list, tuple, np.ndarray)):
+            for i in to_mask:
+                np.place(getattr(self, i), mask, self.nodata[i])
+
+    def to_ascii(self, data_name=None, file_name=None, conform=True, delimiter=' ', **kwargs):
+        if data_name is None:
+            data_name = self.gridlist
+        if file_name is None:
+            file_name = self.gridlist
+        
+        header = """ncols         %s\n
+                    nrows         %s\n
+                    xllcorner     %s\n
+                    yllcorner     %s\n
+                    cellsize      %s\n
+                    NODATA_value  %s\n""" % (self.shape[1],
+                                           self.shape[0],
+                                           self.bbox[0],
+                                           self.bbox[1],
+                                           self.cellsize,
+                                           self.nodata[data_name])
+        np.savetxt(file_name, getattr(self, data_name),
+                   delimiter=delimiter, header=header, **kwargs)
 
 
-b = flow_grid(data='./na_dir_30s/DRT_8th_FDR_globe.asc', data_type='dir', input_type='ascii')
+
+
+#b = flow_grid(data='./na_dir_30s/DRT_8th_FDR_globe.asc', data_type='dir', input_type='ascii')
 q = flow_grid(data='./na_dir_30s/na_dir_30s/w001001.adf', data_type='dir', input_type='raster')
 q.read_input('./na_acc_30s/na_acc_30s/w001001.adf', data_type='acc', input_type='raster')
 q.read_input('./na_dem_30s/na_dem_30s/w001001.adf', data_type='dem', input_type='raster')
-
-z = flow_grid(data='./na_dem_30s/na_dem_30s/w001001.adf', data_type='dem', input_type='raster')
 
 q.catchment(5831, 3797, 9, [64, 128, 1, 2, 4, 8, 16, 32], recursionlimit=15000)
