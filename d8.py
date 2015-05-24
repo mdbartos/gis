@@ -187,7 +187,7 @@ class flow_grid():
         return nearest[1], nearest[0]
 
     def flowdir(self, data=None, include_edges=True, dirmap=[1,2,3,4,5,6,7,8],
-                inplace=True):
+                nodata=0, flat=-1, inplace=True):
         """
         Generates a flow direction grid from a DEM grid.
 
@@ -210,6 +210,11 @@ class flow_grid():
 
         # generate grid of indices
         indices = np.indices(self.shape, dtype=self.shape_min)
+
+        # handle nodata values in dem
+        dem_nodata = self.nodata['dem']
+        dem_mask = (data == dem_nodata)        
+        np.place(data, dem_mask, np.iinfo(data.dtype.type).max)
 
         # initialize indices of corners
         corner = {
@@ -244,7 +249,7 @@ class flow_grid():
     
         # initialize output array
         # TODO self.nodata is no longer a single value
-        outmap = np.full(self.shape, self.nodata, dtype=np.int8)
+        outmap = np.full(self.shape, nodata, dtype=np.int8)
     
         # select the eight cells surrounding a cell
         def select_surround(i, j):
@@ -270,7 +275,7 @@ class flow_grid():
             sur = data[select_surround(i,j)]
             a = ((dat - sur) > 0).any(axis=0)
             b = np.argmax((dat - sur), axis=0) + 1
-            c = self.nodata
+            c = flat
             outmap[i,j] = np.where(a,b,c)
 
         # determine flow direction for edges and corners, if desired
@@ -283,7 +288,7 @@ class flow_grid():
                 if ((dat - sur) > 0).any():
                     outmap[corner[i]['k']] = corner[i]['pad'][np.argmax(dat - sur)]
                 else:
-                    outmap[corner[i]['k']] = self.nodata
+                    outmap[corner[i]['k']] = flat
 
             # fill edges
             for x in edge.keys():
@@ -291,13 +296,16 @@ class flow_grid():
                 sur = data[select_edge_sur(x)]
                 a = ((dat - sur) > 0).any(axis=0)
                 b = edge[x]['pad'][np.argmax((dat - sur), axis=0)]
-                c = self.nodata
+                c = flat
                 outmap[edge[x]['k']] = np.where(a,b,c)
     
         # If direction numbering isn't default, convert values of output array.
         if dirmap != [1,2,3,4,5,6,7,8]:
             dir_d = dict(zip([1,2,3,4,5,6,7,8], dirmap))
             outmap = pd.DataFrame(outmap).apply(lambda x: x.map(dir_d), axis=1).values
+
+        np.place(outmap, dem_mask, nodata)
+        np.place(data, dem_mask, dem_nodata)        
         
         if inplace == True:
             self.dir = outmap
