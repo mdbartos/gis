@@ -663,8 +663,10 @@ class flow_grid():
 
         if isinstance(data_name, str):
             data_name = [data_name]
+        if isinstance(file_name, str):
+            file_name = [file_name]
 
-        for i in data_name:
+        for i, j in zip(data_name, file_name):
             header = """ncols         %s\n
                         nrows         %s\n
                         xllcorner     %s\n
@@ -675,8 +677,8 @@ class flow_grid():
                                                self.bbox[0],
                                                self.bbox[1],
                                                self.cellsize,
-                                               self.nodata[data_name])
-            np.savetxt(file_name, getattr(self, data_name),
+                                               self.nodata[i])
+            np.savetxt(j, getattr(self, i),
                        delimiter=delimiter, header=header, **kwargs)
 
 
