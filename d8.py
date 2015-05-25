@@ -187,7 +187,7 @@ class flow_grid():
         return nearest[1], nearest[0]
 
     def flowdir(self, data=None, include_edges=True, dirmap=[1,2,3,4,5,6,7,8],
-                nodata=0, flat=-1, inplace=True):
+                inplace=True, nodata=0, flat=9):
         """
         Generates a flow direction grid from a DEM grid.
 
@@ -211,9 +211,8 @@ class flow_grid():
         # generate grid of indices
         indices = np.indices(self.shape, dtype=self.shape_min)
 
-        # handle nodata values in dem
-        dem_nodata = self.nodata['dem']
-        dem_mask = (data == dem_nodata)        
+        src_nodata = self.nodata['dem']
+        dem_mask = (data == src_nodata)
         np.place(data, dem_mask, np.iinfo(data.dtype.type).max)
 
         # initialize indices of corners
@@ -299,14 +298,63 @@ class flow_grid():
                 c = flat
                 outmap[edge[x]['k']] = np.where(a,b,c)
     
+        np.place(outmap, dem_mask, nodata)
+        np.place(data, dem_mask, src_nodata)
+
+        # fix flats
+        flats = np.where(outmap == flat)
+	flatmask = (outmap == flat)
+        surrounds = np.ravel_multi_index(select_surround(flats[0], flats[1]), outmap.shape).T
+        flats_ravel = np.ravel_multi_index((flats[0], flats[1]), outmap.shape)
+
+        # one-cell flats with one drainable side (same elevation)
+        drainable = (((data.flat[flats_ravel] - data.flat[surrounds].T) == 0).sum(axis=0) == 1)
+        drainable = np.nonzero(np.logical_and(drainable, ((data.flat[flats_ravel] - data.flat[surrounds].T) == 0)))
+        outmap.flat[flats_ravel[drainable[1]]] = drainable[0] + 1
+
+        flats = np.where(outmap == flat)
+        flatmask = (outmap == flat)
+        surrounds = np.ravel_multi_index(select_surround(flats[0], flats[1]), outmap.shape).T
+        flats_ravel = np.ravel_multi_index((flats[0], flats[1]), outmap.shape)
+
+        # c does not have a defined flow direction
+        # c has at least one neighbor at a higher elevation
+        highedges = []
+        # c has a defined flow direction
+        # c has at least one neighbor at the same elevation
+        lowedges = []
+
+        for i, j in zip(flats_ravel, surrounds):
+            dat = data.flat[i]
+            fdir = outmap.flat[i]
+            sur = data.flat[j]
+            fsur = outmap.flat[j]
+            hightest = ((dat < sur) & (sur != src_nodata))
+            lowtest = ((dat == sur) & (fsur != flat) & (fsur != nodata))
+            if hightest.any():
+                # add c to highedges
+                highedges.append(i)
+            if lowtest.any():
+                # add surrounding n to lowedges
+                lowedges.append(j[lowtest])
+
+        highedges = np.asarray(highedges)
+        lowedges = np.unique(np.concatenate(lowedges))
+
+	#construct labeled regions
+	labels = ndimage.label(flatmask)
+
+	# remove highedges with no label
+        if (labels[0].flat[highedges] == 0).any()
+            highedges = highedges[labels[0].flat[highedges] != 0]
+
+        labelct = (np.bincount(L[0].ravel()) == 1)
+                        
         # If direction numbering isn't default, convert values of output array.
         if dirmap != [1,2,3,4,5,6,7,8]:
             dir_d = dict(zip([1,2,3,4,5,6,7,8], dirmap))
             outmap = pd.DataFrame(outmap).apply(lambda x: x.map(dir_d), axis=1).values
 
-        np.place(outmap, dem_mask, nodata)
-        np.place(data, dem_mask, dem_nodata)        
-        
         if inplace == True:
             self.dir = outmap
         else:
@@ -671,10 +719,8 @@ class flow_grid():
 
         if isinstance(data_name, str):
             data_name = [data_name]
-        if isinstance(file_name, str):
-            file_name = [file_name]
 
-        for i, j in zip(data_name, file_name):
+        for i in data_name:
             header = """ncols         %s\n
                         nrows         %s\n
                         xllcorner     %s\n
@@ -685,17 +731,18 @@ class flow_grid():
                                                self.bbox[0],
                                                self.bbox[1],
                                                self.cellsize,
-                                               self.nodata[i])
-            np.savetxt(j, getattr(self, i),
+                                               self.nodata[data_name])
+            np.savetxt(file_name, getattr(self, data_name),
                        delimiter=delimiter, header=header, **kwargs)
 
 
 
 
-b = flow_grid(data='DRT_8th_FDR_globe.asc', data_type='dir', input_type='ascii')
-q = flow_grid(data='./na_dir_30s/na_dir_30s/w001001.adf', data_type='dir', input_type='raster')
-q.read_input('./na_acc_30s/na_acc_30s/w001001.adf', data_type='acc', input_type='raster')
+#b = flow_grid(data='DRT_8th_FDR_globe.asc', data_type='dir', input_type='ascii')
+#q = flow_grid(data='./na_dir_30s/na_dir_30s/w001001.adf', data_type='dir', input_type='raster')
+q = flow_grid()
 q.read_input('./na_dem_30s/na_dem_30s/w001001.adf', data_type='dem', input_type='raster')
+q.read_input('./na_acc_30s/na_acc_30s/w001001.adf', data_type='acc', input_type='raster')
 
 q.catchment(5831, 3797, 9, [64, 128, 1, 2, 4, 8, 16, 32], recursionlimit=15000)
 
