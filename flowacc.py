@@ -1,39 +1,65 @@
 import numpy as np
+import pandas as pd
+import igraph
 
-outacc = np.zeros(g.shape)
-idx = np.indices(g.shape)
+self = coarse_grid
+dirmap = (64, 128, 1, 2, 4, 8, 16, 32)
+#di = self.view('dir', mask=False)
+di = self.dir
+cdi = di[1:-1, 1:-1]
+shape = cdi.shape
 
-#def goto_cell(i):
-#    dirs = [[0,0], [-1,0], [-1,1], [0,1], [1,1], [1,0], [1,-1], [0,-1], [-1,-1]]
-#    return dirs[d[tuple(i)]]
+go_to = (
+  0 - shape[1],
+  1 - shape[1],
+  1 + 0,
+  1 + shape[1],
+  0 + shape[1],
+ -1 + shape[1],
+ -1 + 0,
+ -1 - shape[1]
+        )
 
-def goto_cell_r(i, j):
-    print i, j
-    inner.append(i)
-    dirs = [[0,0], [-1,0], [-1,1], [0,1], [1,1], [1,0], [1,-1], [0,-1], [-1,-1]]
-    move = dirs[d[tuple(j)]]
-    next_i = i + move[1] + move[0]*d.shape[1]
-    next_cell = j + move
-    if d[tuple(j)] == 0:
-        print 'Done!'
-        return j
-    elif (next_cell < 0).any(): #SHOULD ALSO ACCOUNT FOR N > SHAPE[0], SHAPE[1]
-        print 'Out of bounds!'
-        return j
+go_to = dict(zip(dirmap, go_to))
+
+startnodes = []
+endnodes = []
+
+for i in dirmap:
+    j_0 = np.ravel_multi_index(np.array(np.where(cdi == i)), shape)
+    j_1 = j_0 + go_to[i]
+    startnodes.extend(j_0)
+    endnodes.extend(j_1)
+
+startnodes = np.asarray(startnodes)
+endnodes = np.asarray(endnodes)
+data = np.ones(len(startnodes), dtype=np.bool)
+
+startnodes = startnodes[endnodes >= 0]
+endnodes = endnodes[endnodes >= 0]
+data = data[endnodes >= 0]
+
+s = np.full(cdi.size, -1, dtype=int)
+e = np.full(cdi.size, -1, dtype=int)
+c = np.zeros(cdi.size, dtype=int)
+
+s[startnodes] = startnodes
+e[startnodes] = endnodes
+
+next_s = s.copy()
+next_e = e[(e != -1) & (e <= cdi.size)]
+
+for i in range(10000):
+    len_prev = len(next_e)
+    next_s = s[next_e]
+    next_s = next_s[next_s != -1]
+    next_e = e[next_s]
+    next_e = next_e[(next_e != -1) & (next_e <= cdi.size)]
+    print 'next e:', next_e, len(next_e)
+    len_next = len(next_e)
+    if len_next == len_prev:
+        break
     else:
-        return goto_cell_r(next_i, next_cell)
+        c[next_e] += 1
 
-coverage = []
-
-iterarr = np.vstack(np.dstack(idx))
-iterange = np.arange(iterarr.shape[0])
-
-outer = []
-
-for i in iterange:
-    if not i in coverage:
-        inner = []
-        coverage.append(i)
-        j = iterarr[i]
-        goto_cell_r(i, j)
-        outer.append(inner)
+### HOLY SHIT THIS ACTUALLY WORKS!!!^^^^^
