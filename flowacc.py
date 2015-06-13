@@ -2,10 +2,9 @@ import numpy as np
 import pandas as pd
 import igraph
 
-self = coarse_grid
+self = fine_grid
 dirmap = (64, 128, 1, 2, 4, 8, 16, 32)
-#di = self.view('dir', mask=False)
-di = self.dir
+di = self.view('dir', mask=False)
 cdi = di[1:-1, 1:-1]
 shape = cdi.shape
 
@@ -41,7 +40,7 @@ data = data[endnodes >= 0]
 
 s = np.full(cdi.size, -1, dtype=int)
 e = np.full(cdi.size, -1, dtype=int)
-c = np.zeros(cdi.size, dtype=int)
+c = np.ones(cdi.size, dtype=int)
 
 s[startnodes] = startnodes
 e[startnodes] = endnodes
@@ -60,6 +59,7 @@ for i in range(10000):
     if len_next == len_prev:
         break
     else:
-        c[next_e] += 1
+        c[next_e] += np.bincount(next_e, minlength=next_e.max())[next_e]
+#        c[next_e] += 1    #THIS NEEDS TO ACCOUNT FOR ENDNODES LISTED MORE THAN ONCE IN THE INDEXER
 
 ### HOLY SHIT THIS ACTUALLY WORKS!!!^^^^^
